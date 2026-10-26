@@ -55,6 +55,15 @@ jobs:
             Write-Output ("::error title=Error lines::" + ($errs -join '%0A'))
             $tail = Get-Content build.log -Tail 60 | ForEach-Object { & $esc $_ }
             Write-Output ("::error title=Log tail::" + ($tail -join '%0A'))
+            # Diagnostics: files produced for CMake and the raw output of the install step
+            $files = Get-ChildItem libclash -Recurse -ErrorAction SilentlyContinue | ForEach-Object { $_.FullName + ' ' + $_.Length }
+            Write-Output ("::error title=libclash files::" + (($files | ForEach-Object { & $esc $_ }) -join '%0A'))
+            if (Test-Path build/windows/x64/cmake_install.cmake) {
+              Push-Location build/windows/x64
+              $inst = cmake -DBUILD_TYPE=Release -P cmake_install.cmake 2>&1 | Select-Object -Last 40 | ForEach-Object { & $esc ($_.ToString()) }
+              Pop-Location
+              Write-Output ("::error title=cmake install::" + ($inst -join '%0A'))
+            }
             exit 1
           }
 
