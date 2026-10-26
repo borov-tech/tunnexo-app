@@ -129,7 +129,7 @@ Future<void> _handleStart() async {
 }
 
 String _buildNotificationTitle(Profile? profile) {
-  if (profile == null) return 'FlClashX';
+  if (profile == null) return 'Tunnexo';
   final profileName = profile.label ?? profile.id;
 
   String serviceName = '';

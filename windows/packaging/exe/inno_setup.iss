@@ -41,7 +41,7 @@ var
   i: Integer;
   ResultCode: Integer;
 begin
-  Processes := ['FlClashX.exe', 'FlClashCore.exe', 'FlClashHelperService.exe'];
+  Processes := ['Tunnexo.exe', 'TunnexoHelperService.exe'];
 
   // First try graceful shutdown
   for i := 0 to GetArrayLength(Processes)-1 do
@@ -100,7 +100,7 @@ begin
     PreviousVersion := GetInstalledVersion();
   
   // Stop service if running
-  Exec('sc.exe', 'stop "FlClashHelperService"', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+  Exec('sc.exe', 'stop "TunnexoHelperService"', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
   Sleep(1000);
   
   // Kill all processes
@@ -159,7 +159,7 @@ begin
     Sleep(500);
     // Ensure helper service is started after install/upgrade, independent of app
     try
-      Exec('sc.exe', 'start "FlClashHelperService"', '', SW_HIDE, ewNoWait, ResultCode);
+      Exec('sc.exe', 'start "TunnexoHelperService"', '', SW_HIDE, ewNoWait, ResultCode);
     except
     end;
   end;
@@ -173,24 +173,24 @@ begin
     usUninstall:
     begin
       // Stop service first
-      Exec('sc.exe', 'stop "FlClashHelperService"', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+      Exec('sc.exe', 'stop "TunnexoHelperService"', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
       Sleep(1000);
       
       // Kill all processes
       KillProcesses;
       
       // Delete service
-      Exec('sc.exe', 'delete "FlClashHelperService"', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+      Exec('sc.exe', 'delete "TunnexoHelperService"', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
       Sleep(500);
     end;
     
     usPostUninstall:
     begin
-      if DirExists(ExpandConstant('{userappdata}\com.follow\clashx')) then
+      if DirExists(ExpandConstant('{userappdata}\Tunnexo\Tunnexo')) then
       begin
         if MsgBox('Удалить пользовательские данные программы?', mbConfirmation, MB_YESNO) = IDYES then
         begin
-          DelTree(ExpandConstant('{userappdata}\com.follow\clashx'), True, True, True);
+          DelTree(ExpandConstant('{userappdata}\Tunnexo\Tunnexo'), True, True, True);
         end;
       end;
     end;

@@ -131,7 +131,7 @@ class Build {
         ),
       ];
 
-  static String get appName => "FlClashX";
+  static String get appName => "Tunnexo";
 
   static String get coreName => "FlClashCore";
 
@@ -379,7 +379,7 @@ class Build {
     final targetPath = join(
       outDir,
       target.name,
-      "FlClashHelperService${target.executableExtensionName}",
+      "TunnexoHelperService${target.executableExtensionName}",
     );
     await File(outPath).copy(targetPath);
   }
@@ -600,6 +600,33 @@ class BuildCommand extends Command {
     final winArch = arch == Arch.arm64 ? "arm64" : "x64";
     final buildDir = join(current, "build", "windows", winArch, "runner", "Release");
 
+    // Tunnexo: ship the MSVC runtime next to the exe (app-local deployment), so a
+    // clean Windows without the VC++ Redistributable doesn't fail with
+    // "MSVCP140.dll not found". The DLLs are taken from the build machine.
+    if (arch == Arch.amd64) {
+      final sys32 = join(Platform.environment["SystemRoot"] ?? r"C:\Windows", "System32");
+      const runtimeDlls = [
+        "msvcp140.dll",
+        "msvcp140_1.dll",
+        "msvcp140_2.dll",
+        "vcruntime140.dll",
+        "vcruntime140_1.dll",
+      ];
+      for (final dll in runtimeDlls) {
+        final src = File(join(sys32, dll));
+        if (src.existsSync()) {
+          src.copySync(join(buildDir, dll));
+          print("✅ bundled $dll");
+        } else {
+          print("⚠️ $dll not found in $sys32");
+        }
+      }
+      if (!File(join(buildDir, "msvcp140.dll")).existsSync() ||
+          !File(join(buildDir, "vcruntime140.dll")).existsSync()) {
+        throw "MSVC runtime DLLs were not bundled";
+      }
+    }
+
     final version = Build.readVersion();
     final distDir = Directory(Build.distPath);
     if (!distDir.existsSync()) distDir.createSync(recursive: true);
@@ -616,11 +643,11 @@ class BuildCommand extends Command {
     final issTemplate = File(join(current, "windows", "packaging", "exe", "inno_setup.iss"));
     if (issTemplate.existsSync()) {
       final issContent = issTemplate.readAsStringSync()
-          .replaceAll("{{APP_ID}}", "728B3532-C74B-4870-9068-BE70FE12A3E6")
+          .replaceAll("{{APP_ID}}", "5E0B6C1A-7F3D-4C2B-9A8E-2D4F6B1C3E7A")
           .replaceAll("{{APP_VERSION}}", version)
           .replaceAll("{{DISPLAY_NAME}}", Build.appName)
-          .replaceAll("{{PUBLISHER_NAME}}", "pluralplay")
-          .replaceAll("{{PUBLISHER_URL}}", "https://github.com/pluralplay/FlClashX")
+          .replaceAll("{{PUBLISHER_NAME}}", "Tunnexo")
+          .replaceAll("{{PUBLISHER_URL}}", "https://tunnexo.com")
           .replaceAll("{{INSTALL_DIR_NAME}}", "{autopf}\\${Build.appName}")
           .replaceAll("{{OUTPUT_BASE_FILENAME}}", "${Build.appName}-windows-$archName-setup")
           .replaceAll("{{SETUP_ICON_FILE}}", join(current, "windows", "runner", "resources", "app_icon.ico"))
