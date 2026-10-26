@@ -64,24 +64,26 @@ class _ToolboxViewState extends ConsumerState<ToolsView> {
   List<Widget> _getOtherList(BuildContext context, bool enableDeveloperMode) => generateSection(
       title: AppLocalizations.of(context).other,
       items: [
-        const _RuntimeConfigItem(),
-        const _DisclaimerItem(),
+        // Tunnexo: advanced items are only visible in developer mode
+        // (enable it by tapping the logo in "About" 10 times).
+        if (enableDeveloperMode) const _RuntimeConfigItem(),
+        if (enableDeveloperMode) const _DisclaimerItem(),
         if (enableDeveloperMode) const _DeveloperItem(),
         const _InfoItem(),
         const _CoreStatusItem(),
       ],
     );
 
-  List<Widget> _getSettingList(BuildContext context) => generateSection(
+  List<Widget> _getSettingList(BuildContext context, bool enableDeveloperMode) => generateSection(
       title: AppLocalizations.of(context).settings,
       items: [
         const _LocaleItem(),
         const _ThemeItem(),
-        const _BackupItem(),
-        if (system.isDesktop) const _HotkeyItem(),
-        if (Platform.isWindows) const _LoopbackItem(),
+        if (enableDeveloperMode) const _BackupItem(),
+        if (enableDeveloperMode && system.isDesktop) const _HotkeyItem(),
+        if (enableDeveloperMode && Platform.isWindows) const _LoopbackItem(),
         if (Platform.isAndroid) const _AccessItem(),
-        const _ConfigItem(),
+        if (enableDeveloperMode) const _ConfigItem(),
         const _SettingItem(),
       ],
     );
@@ -98,7 +100,7 @@ class _ToolboxViewState extends ConsumerState<ToolsView> {
       Consumer(
         builder: (_, ref, __) {
           final state = ref.watch(moreToolsSelectorStateProvider);
-          if (state.navigationItems.isEmpty) {
+          if (!vm2.b || state.navigationItems.isEmpty) {
             return Container();
           }
           return Column(
@@ -109,7 +111,7 @@ class _ToolboxViewState extends ConsumerState<ToolsView> {
           );
         },
       ),
-      ..._getSettingList(context),
+      ..._getSettingList(context, vm2.b),
       ..._getOtherList(context, vm2.b),
     ];
     return ListView.builder(

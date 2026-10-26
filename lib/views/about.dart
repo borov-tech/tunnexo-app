@@ -4,9 +4,11 @@ import 'dart:io';
 import 'package:flclashx/clash/core.dart';
 import 'package:flclashx/common/common.dart';
 import 'package:flclashx/enum/enum.dart';
+import 'package:flclashx/providers/providers.dart';
 import 'package:flclashx/state.dart';
 import 'package:flclashx/widgets/widgets.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 @immutable
 class Contributor {
@@ -232,53 +234,15 @@ class AboutView extends StatelessWidget {
                 ],
               ),
               onEasterEgg: () {
-                showDialog(
-                  context: context,
-                  barrierDismissible: false,
-                  builder: (dialogContext) => AlertDialog(
-                    title: const Text(
-                      'REMNAFAMILY ONE LOVE',
-                      textAlign: TextAlign.center,
-                      style: TextStyle(
-                        fontFamily: 'Unbounded',
-                        fontSize: 18,
-                        fontWeight: FontWeight.bold,
-                      ),
-                    ),
-                    content: Column(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        const Text(
-                          '❤️',
-                          textAlign: TextAlign.center,
-                          style: TextStyle(fontSize: 48),
-                        ),
-                        const SizedBox(height: 16),
-                        InkWell(
-                          onTap: () {
-                            globalState.openUrl('https://docs.rw');
-                          },
-                          child: const Text(
-                            'TRY REMNAWAVE',
-                            textAlign: TextAlign.center,
-                            style: TextStyle(
-                              color: Colors.blue,
-                              fontFamily: 'Unbounded',
-                              fontSize: 14,
-                              fontWeight: FontWeight.bold,
-                            ),
-                          ),
-                        ),
-                      ],
-                    ),
-                    actionsAlignment: MainAxisAlignment.center,
-                    actions: [
-                      TextButton(
-                        onPressed: () => Navigator.of(dialogContext).pop(),
-                        child: const Text('OK'),
-                      ),
-                    ],
-                  ),
+                final container = ProviderScope.containerOf(context);
+                final enabled = !container.read(appSettingProvider).developerMode;
+                container.read(appSettingProvider.notifier).updateState(
+                      (state) => state.copyWith(developerMode: enabled),
+                    );
+                globalState.showNotifier(
+                  enabled
+                      ? 'Расширенные настройки включены'
+                      : 'Расширенные настройки скрыты',
                 );
               },
             ),

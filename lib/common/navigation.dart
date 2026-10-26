@@ -55,7 +55,7 @@ class Navigation {
           ),
         ),
         description: "connectionsDesc",
-        modes: [NavigationItemMode.desktop, NavigationItemMode.more],
+        modes: [NavigationItemMode.more],
       ),
       const NavigationItem(
         icon: Icon(Icons.storage),
