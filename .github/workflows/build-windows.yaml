@@ -16,7 +16,8 @@ env:
 
 jobs:
   windows:
-    runs-on: windows-latest
+    # windows-2022 = Visual Studio 2022 (как в сборках FlClashX); на windows-latest уже VS 18
+    runs-on: windows-2022
     timeout-minutes: 90
     steps:
       - name: Checkout
@@ -58,11 +59,16 @@ jobs:
             # Diagnostics: files produced for CMake and the raw output of the install step
             $files = Get-ChildItem libclash -Recurse -ErrorAction SilentlyContinue | ForEach-Object { $_.FullName + ' ' + $_.Length }
             Write-Output ("::error title=libclash files::" + (($files | ForEach-Object { & $esc $_ }) -join '%0A'))
+            $ErrorActionPreference = 'Continue'
             if (Test-Path build/windows/x64/cmake_install.cmake) {
+              $cm = (Get-Command cmake -ErrorAction SilentlyContinue).Source
+              if (-not $cm) { $cm = (Get-ChildItem 'C:\Program Files\Microsoft Visual Studio' -Recurse -Filter cmake.exe -ErrorAction SilentlyContinue | Select-Object -First 1).FullName }
               Push-Location build/windows/x64
-              $inst = cmake -DBUILD_TYPE=Release -P cmake_install.cmake 2>&1 | Select-Object -Last 40 | ForEach-Object { & $esc ($_.ToString()) }
+              $inst = & $cm -DBUILD_TYPE=Release -P cmake_install.cmake 2>&1 | Select-Object -Last 40 | ForEach-Object { & $esc ($_.ToString()) }
               Pop-Location
-              Write-Output ("::error title=cmake install::" + ($inst -join '%0A'))
+              Write-Output ("::error title=cmake install::" + "cmake=$cm%0A" + ($inst -join '%0A'))
+            } else {
+              Write-Output "::error title=cmake install::no cmake_install.cmake"
             }
             exit 1
           }
