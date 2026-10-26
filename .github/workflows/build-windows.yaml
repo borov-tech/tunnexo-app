@@ -44,7 +44,19 @@ jobs:
         run: flutter pub get
 
       - name: Build (core + helper + app + installer)
-        run: dart setup.dart windows --arch amd64 --env stable
+        shell: pwsh
+        run: |
+          dart setup.dart windows --arch amd64 --env stable 2>&1 | Tee-Object -FilePath build.log
+          $code = $LASTEXITCODE
+          if ($code -ne 0 -or -not (Test-Path dist/*setup.exe)) {
+            # Errors are surfaced as annotations so they can be read via the API
+            $esc = { param($l) ($l -replace '%','%25' -replace "`r",'' ) }
+            $errs = Get-Content build.log | Where-Object { $_ -match '(?i)error|exception|failed|not found|⚠️' } | Select-Object -First 40 | ForEach-Object { & $esc $_ }
+            Write-Output ("::error title=Error lines::" + ($errs -join '%0A'))
+            $tail = Get-Content build.log -Tail 60 | ForEach-Object { & $esc $_ }
+            Write-Output ("::error title=Log tail::" + ($tail -join '%0A'))
+            exit 1
+          }
 
       - name: Upload installer
         uses: actions/upload-artifact@v6
