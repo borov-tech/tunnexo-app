@@ -1,0 +1,46 @@
+name: release
+
+# Builds Windows and Android in parallel and publishes ONE release with all
+# files at once, so "latest" never points at a release missing a platform.
+on:
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: "Версия, например v0.4.4"
+        required: true
+
+permissions:
+  contents: write
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+jobs:
+  windows:
+    uses: ./.github/workflows/build-windows.yaml
+
+  android:
+    uses: ./.github/workflows/build-android.yaml
+    secrets: inherit
+
+  publish:
+    needs: [windows, android]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download builds
+        uses: actions/download-artifact@v6
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: List files
+        run: ls -la dist
+
+      - name: Publish release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ inputs.release_tag }}
+          name: Tunnexo ${{ inputs.release_tag }}
+          target_commitish: ${{ github.sha }}
+          make_latest: true
+          files: dist/*

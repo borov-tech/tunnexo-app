@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
@@ -13,10 +14,43 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_svg/flutter_svg.dart';
+import 'package:intl/intl.dart' show Intl;
+import 'package:url_launcher/url_launcher.dart';
 
 // ----------------------------------------------------------------------------
 // Helpers
 // ----------------------------------------------------------------------------
+
+// True while a user-started connection is being brought up: drives the button
+// shimmer and the rings around the logo.
+final _heroConnecting = ValueNotifier<bool>(false);
+
+// Short "Protected · country" confirmation shown above the connect button.
+final _heroToast = ValueNotifier<String?>(null);
+Timer? _heroToastTimer;
+
+void _showHeroToast(String text) {
+  _heroToastTimer?.cancel();
+  _heroToast.value = text;
+  _heroToastTimer = Timer(const Duration(milliseconds: 2600), () {
+    _heroToast.value = null;
+  });
+}
+
+// Tunnexo strings are Russian-first; English only when the app runs in English.
+bool get _isEn => Intl.getCurrentLocale().toLowerCase().startsWith('en');
+
+bool _reduceMotion(BuildContext context) =>
+    MediaQuery.maybeDisableAnimationsOf(context) ?? false;
+
+Future<void> _launchExternal(String url) async {
+  try {
+    await launchUrl(Uri.parse(url), mode: LaunchMode.externalApplication);
+  } catch (_) {
+    await globalState.openUrl(url);
+  }
+}
+
 String _countryCodeToEmoji(String code) {
   if (code.length != 2) return '🌐';
   final upper = code.toUpperCase();
@@ -312,7 +346,7 @@ class HeroConnect extends ConsumerWidget {
             child: Column(
               children: [
                 const SizedBox(height: 8),
-                _Logo(logoUrl: logoUrl),
+                _LogoWithRings(child: _Logo(logoUrl: logoUrl)),
                 const SizedBox(height: 16),
                 Text(
                   serviceName,
@@ -363,7 +397,18 @@ class HeroConnect extends ConsumerWidget {
         ),
         // Pinned to the bottom of the hero, just above the nav bar.
         const SizedBox(height: 14),
-        _ConnectButton(isReady: isReady),
+        Stack(
+          clipBehavior: Clip.none,
+          children: [
+            _ConnectButton(isReady: isReady, protectedName: displayName),
+            const Positioned(
+              left: 0,
+              right: 0,
+              bottom: 54 + 12,
+              child: IgnorePointer(child: _ProtectedToast()),
+            ),
+          ],
+        ),
       ],
     );
   }
@@ -567,12 +612,14 @@ class _HeroBuyButton extends StatelessWidget {
     required this.label,
     required this.onTap,
     this.filled = true,
+    this.autofocus = false,
   });
 
   final IconData icon;
   final String label;
   final VoidCallback onTap;
   final bool filled;
+  final bool autofocus;
 
   @override
   Widget build(BuildContext context) {
@@ -583,6 +630,7 @@ class _HeroBuyButton extends StatelessWidget {
     final fg = filled ? colorScheme.onPrimary : colorScheme.primary;
     return _FocusableTap(
       borderRadius: 16,
+      autofocus: autofocus,
       onTap: onTap,
       child: Container(
         width: double.infinity,
@@ -671,7 +719,26 @@ class _ServerPanel extends ConsumerWidget {
               color: colorScheme.surfaceContainerHigh.withValues(alpha: 0.6),
               border: Border.all(color: colorScheme.outlineVariant.withValues(alpha: 0.6)),
             ),
-            child: Row(
+            // Country change: the old card content fades/slides out, the new
+            // one in (keyed by the selected server).
+            child: AnimatedSwitcher(
+              duration: _reduceMotion(context)
+                  ? Duration.zero
+                  : const Duration(milliseconds: 380),
+              switchInCurve: Curves.easeOutCubic,
+              switchOutCurve: Curves.easeInCubic,
+              transitionBuilder: (child, animation) => FadeTransition(
+                opacity: animation,
+                child: SlideTransition(
+                  position: Tween<Offset>(
+                    begin: const Offset(0, 0.18),
+                    end: Offset.zero,
+                  ).animate(animation),
+                  child: child,
+                ),
+              ),
+              child: Row(
+              key: ValueKey(serverName),
               children: [
                 _FlagCircle(
                   countryCode: code,
@@ -751,7 +818,7 @@ class _ServerPanel extends ConsumerWidget {
                     mainAxisSize: MainAxisSize.min,
                     crossAxisAlignment: CrossAxisAlignment.center,
                     children: [
-                      _SignalBars(delay: delay),
+                      _SignalBars(delay: delay, serverName: serverName),
                       if (delay != null && delay > 0) ...[
                         const SizedBox(height: 3),
                         Text(
@@ -774,6 +841,7 @@ class _ServerPanel extends ConsumerWidget {
                   color: colorScheme.onSurfaceVariant,
                 ),
               ],
+            ),
             ),
           ),
         );
@@ -927,11 +995,13 @@ class _FlagCircle extends StatelessWidget {
   }
 }
 
-// Mobile-network-style signal bars representing ping quality.
+// Mobile-network-style signal bars representing ping quality. The bars fill up
+// one after another whenever the server or its quality level changes.
 class _SignalBars extends StatelessWidget {
-  const _SignalBars({required this.delay});
+  const _SignalBars({required this.delay, this.serverName = ''});
 
   final int? delay;
+  final String serverName;
 
   @override
   Widget build(BuildContext context) {
@@ -958,146 +1028,550 @@ class _SignalBars extends StatelessWidget {
     }
 
     const heights = [9.0, 13.0, 17.0, 21.0];
-    return Row(
-      mainAxisSize: MainAxisSize.min,
-      crossAxisAlignment: CrossAxisAlignment.end,
-      children: List.generate(4, (i) => Padding(
-          padding: EdgeInsets.only(left: i == 0 ? 0 : 3),
-          child: Container(
-            width: 4,
-            height: heights[i],
-            decoration: BoxDecoration(
-              borderRadius: BorderRadius.circular(2),
-              color: i < level ? color : dim,
-            ),
-          ),
-        )),
+    Widget bars(double filled) => Row(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.end,
+          children: List.generate(4, (i) {
+            final f = (filled - i).clamp(0.0, 1.0);
+            return Padding(
+              padding: EdgeInsets.only(left: i == 0 ? 0 : 3),
+              child: Container(
+                width: 4,
+                height: heights[i],
+                decoration: BoxDecoration(
+                  borderRadius: BorderRadius.circular(2),
+                  color: Color.lerp(dim, color, f),
+                ),
+              ),
+            );
+          }),
+        );
+
+    if (_reduceMotion(context) || level == 0) return bars(level.toDouble());
+    return TweenAnimationBuilder<double>(
+      key: ValueKey('$serverName|$level'),
+      tween: Tween(begin: 0, end: level.toDouble()),
+      duration: Duration(milliseconds: 160 * level + 200),
+      curve: Curves.easeOut,
+      builder: (_, value, __) => bars(value),
     );
   }
 }
 
 // ----------------------------------------------------------------------------
-// Connect button — shows the time counter while connected
+// Logo rings — soft rings expand from the logo while connecting
 // ----------------------------------------------------------------------------
-class _ConnectButton extends ConsumerWidget {
-  const _ConnectButton({required this.isReady});
+class _LogoWithRings extends StatefulWidget {
+  const _LogoWithRings({required this.child});
 
-  final bool isReady;
+  final Widget child;
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  State<_LogoWithRings> createState() => _LogoWithRingsState();
+}
+
+class _LogoWithRingsState extends State<_LogoWithRings>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _c = AnimationController(
+    vsync: this,
+    duration: const Duration(milliseconds: 1800),
+  );
+  bool _reduce = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _heroConnecting.addListener(_sync);
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    _reduce = _reduceMotion(context);
+    _apply();
+  }
+
+  void _apply() {
+    final on = _heroConnecting.value && !_reduce;
+    if (on && !_c.isAnimating) {
+      _c.repeat();
+    } else if (!on && _c.isAnimating) {
+      _c
+        ..stop()
+        ..reset();
+    }
+  }
+
+  void _sync() {
+    if (!mounted) return;
+    _apply();
+    setState(() {});
+  }
+
+  @override
+  void dispose() {
+    _heroConnecting.removeListener(_sync);
+    _c.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final color = context.colorScheme.primary;
+    return SizedBox(
+      width: 104,
+      height: 104,
+      child: Stack(
+        clipBehavior: Clip.none,
+        alignment: Alignment.center,
+        children: [
+          if (_c.isAnimating)
+            Positioned.fill(
+              child: IgnorePointer(
+                child: AnimatedBuilder(
+                  animation: _c,
+                  builder: (_, __) => CustomPaint(
+                    painter: _RingsPainter(t: _c.value, color: color),
+                  ),
+                ),
+              ),
+            ),
+          widget.child,
+        ],
+      ),
+    );
+  }
+}
+
+class _RingsPainter extends CustomPainter {
+  _RingsPainter({required this.t, required this.color});
+
+  final double t;
+  final Color color;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final center = size.center(Offset.zero);
+    for (var i = 0; i < 3; i++) {
+      final p = (t + i / 3) % 1.0;
+      final scale = 1 + 0.9 * Curves.easeOut.transform(p);
+      final alpha = 0.55 * (1 - p) * (1 - p);
+      final rect = Rect.fromCenter(
+        center: center,
+        width: size.width * scale,
+        height: size.height * scale,
+      );
+      canvas.drawRRect(
+        RRect.fromRectAndRadius(rect, Radius.circular(26 * scale)),
+        Paint()
+          ..style = PaintingStyle.stroke
+          ..strokeWidth = 2
+          ..color = color.withValues(alpha: alpha),
+      );
+    }
+  }
+
+  @override
+  bool shouldRepaint(_RingsPainter oldDelegate) =>
+      oldDelegate.t != t || oldDelegate.color != color;
+}
+
+// ----------------------------------------------------------------------------
+// "Protected · country" toast above the connect button
+// ----------------------------------------------------------------------------
+class _ProtectedToast extends StatelessWidget {
+  const _ProtectedToast();
+
+  @override
+  Widget build(BuildContext context) {
+    final colorScheme = context.colorScheme;
+    const ok = Color(0xFF5BD68A);
+    return ValueListenableBuilder<String?>(
+      valueListenable: _heroToast,
+      builder: (_, text, __) {
+        final visible = text != null;
+        return AnimatedSlide(
+          offset: visible ? Offset.zero : const Offset(0, 0.4),
+          duration: const Duration(milliseconds: 260),
+          curve: Curves.easeOutCubic,
+          child: AnimatedOpacity(
+            opacity: visible ? 1 : 0,
+            duration: const Duration(milliseconds: 220),
+            child: Center(
+              child: Container(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                decoration: BoxDecoration(
+                  color: colorScheme.surfaceContainerHighest,
+                  borderRadius: BorderRadius.circular(22),
+                  border: Border.all(color: ok.withValues(alpha: 0.45)),
+                  boxShadow: [
+                    BoxShadow(
+                      color: Colors.black.withValues(alpha: 0.35),
+                      blurRadius: 18,
+                      offset: const Offset(0, 6),
+                    ),
+                  ],
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    const Icon(Icons.shield_rounded, size: 18, color: ok),
+                    const SizedBox(width: 8),
+                    Flexible(
+                      child: Text(
+                        text ?? '',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: context.textTheme.titleSmall?.copyWith(
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        );
+      },
+    );
+  }
+}
+
+// ----------------------------------------------------------------------------
+// Connect button — press, "connecting" shimmer, then the time counter
+// ----------------------------------------------------------------------------
+class _ConnectButton extends ConsumerStatefulWidget {
+  const _ConnectButton({required this.isReady, this.protectedName = ''});
+
+  final bool isReady;
+  final String protectedName;
+
+  @override
+  ConsumerState<_ConnectButton> createState() => _ConnectButtonState();
+}
+
+class _ConnectButtonState extends ConsumerState<_ConnectButton>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _shimmer = AnimationController(
+    vsync: this,
+    duration: const Duration(milliseconds: 1300),
+  );
+  bool _pressed = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _heroConnecting.addListener(_onConnecting);
+  }
+
+  @override
+  void dispose() {
+    _heroConnecting.removeListener(_onConnecting);
+    _shimmer.dispose();
+    super.dispose();
+  }
+
+  void _onConnecting() {
+    if (!mounted) return;
+    if (_heroConnecting.value && !_reduceMotion(context)) {
+      _shimmer.repeat();
+    } else {
+      _shimmer
+        ..stop()
+        ..reset();
+    }
+    setState(() {});
+  }
+
+  void _setPressed(bool value) {
+    if (_pressed != value && mounted) setState(() => _pressed = value);
+  }
+
+  Future<void> _toggle(bool isStart) async {
+    if (_heroConnecting.value) return;
+    if (Platform.isAndroid) {
+      HapticFeedback.mediumImpact();
+    }
+    if (isStart) {
+      await globalState.appController.updateStatus(false);
+      return;
+    }
+    _heroConnecting.value = true;
+    final began = DateTime.now();
+    try {
+      await globalState.appController.updateStatus(true)
+          .timeout(const Duration(seconds: 30));
+    } catch (_) {
+      // Errors are surfaced by the controller itself.
+    }
+    // Keep the "connecting" state on screen long enough to be read.
+    const minShow = Duration(milliseconds: 900);
+    final spent = DateTime.now().difference(began);
+    if (spent < minShow) await Future<void>.delayed(minShow - spent);
+    _heroConnecting.value = false;
+    if (!mounted) return;
+    if (ref.read(runTimeProvider) == null) return;
+    final name = widget.protectedName.trim();
+    final word = _isEn ? 'Protected' : 'Защищено';
+    _showHeroToast(name.isEmpty ? word : '$word · $name');
+    if (Platform.isAndroid) {
+      HapticFeedback.vibrate();
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
     final colorScheme = context.colorScheme;
     final runTime = ref.watch(runTimeProvider);
     final isStart = runTime != null;
+    final connecting = _heroConnecting.value && !isStart;
+    final isReady = widget.isReady;
 
     final Color bg;
     final Color fg;
+    Border? border;
     if (!isReady) {
       bg = colorScheme.surfaceContainerHighest.withValues(alpha: 0.5);
       fg = colorScheme.onSurface.withValues(alpha: 0.38);
+    } else if (connecting) {
+      bg = Color.lerp(colorScheme.primary, colorScheme.surface, 0.72)!;
+      fg = Color.lerp(colorScheme.primary, Colors.white, 0.45)!;
+      border = Border.all(color: colorScheme.primary.withValues(alpha: 0.45));
     } else if (isStart) {
       bg = colorScheme.surfaceContainerHigh.withValues(alpha: 0.8);
       fg = colorScheme.primary;
+      border = Border.all(color: colorScheme.primary.withValues(alpha: 0.4));
     } else {
       bg = colorScheme.primary;
       fg = colorScheme.onPrimary;
     }
 
+    final Widget content;
+    if (connecting) {
+      content = Text(
+        _isEn ? 'Connecting…' : 'Подключение…',
+        key: const ValueKey('connecting'),
+        style: context.textTheme.titleSmall?.copyWith(
+          color: fg,
+          fontWeight: FontWeight.w700,
+          letterSpacing: 0.3,
+        ),
+      );
+    } else if (isStart) {
+      content = Text(
+        utils.getTimeText(runTime),
+        key: const ValueKey('on'),
+        style: context.textTheme.titleSmall?.copyWith(
+          color: fg,
+          fontWeight: FontWeight.w700,
+          letterSpacing: 0.5,
+          fontFamily: FontFamily.jetBrainsMono.value,
+        ),
+      );
+    } else {
+      content = Icon(
+        Icons.play_arrow_rounded,
+        key: const ValueKey('off'),
+        size: 30,
+        color: fg,
+      );
+    }
+
     return _FocusableTap(
       autofocus: true,
       borderRadius: 24,
-      onTap: isReady
-          ? () {
-              if (Platform.isAndroid) {
-                HapticFeedback.mediumImpact();
-              }
-              globalState.appController.updateStatus(!isStart);
-            }
-          : null,
-      child: AnimatedContainer(
-        duration: const Duration(milliseconds: 250),
-        width: double.infinity,
-        height: 54,
-        alignment: Alignment.center,
-        decoration: BoxDecoration(
-          borderRadius: BorderRadius.circular(24),
-          color: bg,
-          border: isStart
-              ? Border.all(color: colorScheme.primary.withValues(alpha: 0.4))
-              : null,
+      onTap: isReady ? () => _toggle(isStart) : null,
+      child: Listener(
+        onPointerDown: (_) => _setPressed(isReady),
+        onPointerUp: (_) => _setPressed(false),
+        onPointerCancel: (_) => _setPressed(false),
+        child: AnimatedScale(
+          scale: _pressed ? 0.96 : 1,
+          duration: const Duration(milliseconds: 120),
+          child: AnimatedContainer(
+            duration: const Duration(milliseconds: 300),
+            width: double.infinity,
+            height: 54,
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(24),
+              color: bg,
+              border: border,
+            ),
+            child: ClipRRect(
+              borderRadius: BorderRadius.circular(23),
+              child: Stack(
+                fit: StackFit.expand,
+                children: [
+                  if (connecting && _shimmer.isAnimating)
+                    AnimatedBuilder(
+                      animation: _shimmer,
+                      builder: (_, __) => FractionalTranslation(
+                        translation: Offset(-1 + 2 * _shimmer.value, 0),
+                        child: DecoratedBox(
+                          decoration: BoxDecoration(
+                            gradient: LinearGradient(
+                              colors: [
+                                Colors.white.withValues(alpha: 0),
+                                Colors.white.withValues(alpha: 0.16),
+                                Colors.white.withValues(alpha: 0),
+                              ],
+                              stops: const [0.3, 0.5, 0.7],
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
+                  Center(
+                    child: AnimatedSwitcher(
+                      duration: const Duration(milliseconds: 260),
+                      transitionBuilder: (child, animation) => FadeTransition(
+                        opacity: animation,
+                        child: ScaleTransition(
+                          scale: Tween<double>(begin: 0.85, end: 1)
+                              .animate(animation),
+                          child: child,
+                        ),
+                      ),
+                      child: content,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
         ),
-        // Running: uptime only. Stopped: just a Play glyph (no "Start" label).
-        child: isStart
-            ? Text(
-                utils.getTimeText(runTime),
-                style: context.textTheme.titleSmall?.copyWith(
-                  color: fg,
-                  fontWeight: FontWeight.w700,
-                  letterSpacing: 0.5,
-                  fontFamily: FontFamily.jetBrainsMono.value,
-                ),
-              )
-            : Icon(Icons.play_arrow_rounded, size: 30, color: fg),
       ),
     );
   }
 }
 
 // ----------------------------------------------------------------------------
-// Empty state (no profile)
+// Empty state (no profile) — welcome + three steps
 // ----------------------------------------------------------------------------
-class _EmptyHero extends ConsumerWidget {
+class _EmptyHero extends StatelessWidget {
   const _EmptyHero();
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  Widget build(BuildContext context) {
     final colorScheme = context.colorScheme;
-    return Column(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        const SizedBox(height: 8),
-        const _Logo(),
-        const SizedBox(height: 16),
-        Text(
-          appName,
-          style: context.textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.w700),
-        ),
-        const SizedBox(height: 24),
-        _FocusableTap(
-          autofocus: true,
-          borderRadius: 16,
-          onTap: () async {
-            final url = await globalState.showCommonDialog<String>(
-              child: const URLFormDialog(),
-            );
-            if (url != null) {
-              globalState.appController.addProfileFormURL(url);
-            }
-          },
-          child: Container(
+    final en = _isEn;
+    final steps = en
+        ? const [
+            'Get a subscription in the Telegram bot',
+            'In the bot tap “Connect” → “Add to Tunnexo”',
+            'Tap the big connect button',
+          ]
+        : const [
+            'Оформите подписку в Telegram-боте',
+            'Нажмите в боте «Подключиться» → «Добавить в Tunnexo»',
+            'Нажмите большую кнопку подключения',
+          ];
+    return SingleChildScrollView(
+      child: Column(
+        children: [
+          const SizedBox(height: 8),
+          const _Logo(),
+          const SizedBox(height: 16),
+          Text(
+            en ? 'Welcome!' : 'Добро пожаловать!',
+            textAlign: TextAlign.center,
+            style: context.textTheme.headlineSmall
+                ?.copyWith(fontWeight: FontWeight.w700),
+          ),
+          const SizedBox(height: 6),
+          Text(
+            en
+                ? 'Setup takes a couple of minutes'
+                : 'Подключение займёт пару минут',
+            textAlign: TextAlign.center,
+            style: context.textTheme.bodyMedium
+                ?.copyWith(color: colorScheme.onSurfaceVariant),
+          ),
+          const SizedBox(height: 20),
+          Container(
             width: double.infinity,
-            padding: const EdgeInsets.symmetric(vertical: 16),
+            padding: const EdgeInsets.fromLTRB(14, 8, 14, 8),
             decoration: BoxDecoration(
-              borderRadius: BorderRadius.circular(16),
-              color: colorScheme.primary,
+              borderRadius: BorderRadius.circular(18),
+              color: colorScheme.surfaceContainerHigh.withValues(alpha: 0.6),
+              border: Border.all(
+                  color: colorScheme.outlineVariant.withValues(alpha: 0.6)),
             ),
-            child: Row(
-              mainAxisAlignment: MainAxisAlignment.center,
+            child: Column(
               children: [
-                Icon(Icons.add_rounded, size: 20, color: colorScheme.onPrimary),
-                const SizedBox(width: 8),
-                Text(
-                  appLocalizations.addProfile,
-                  style: context.textTheme.titleSmall?.copyWith(
-                    color: colorScheme.onPrimary,
-                    fontWeight: FontWeight.w600,
-                  ),
-                ),
+                for (var i = 0; i < steps.length; i++)
+                  _OnboardStep(number: i + 1, text: steps[i]),
               ],
             ),
           ),
-        ),
-      ],
+          const SizedBox(height: 18),
+          _HeroBuyButton(
+            icon: Icons.send_rounded,
+            label: en ? 'Open the bot' : 'Открыть бота',
+            autofocus: true,
+            onTap: () => _launchExternal(tunnexoBotUrl),
+          ),
+          const SizedBox(height: 10),
+          _HeroBuyButton(
+            icon: Icons.link_rounded,
+            label: en ? 'Paste a link manually' : 'Вставить ссылку вручную',
+            filled: false,
+            onTap: () async {
+              final url = await globalState.showCommonDialog<String>(
+                child: const URLFormDialog(),
+              );
+              if (url != null) {
+                globalState.appController.addProfileFormURL(url);
+              }
+            },
+          ),
+          const SizedBox(height: 8),
+        ],
+      ),
+    );
+  }
+}
+
+class _OnboardStep extends StatelessWidget {
+  const _OnboardStep({required this.number, required this.text});
+
+  final int number;
+  final String text;
+
+  @override
+  Widget build(BuildContext context) {
+    final colorScheme = context.colorScheme;
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 8),
+      child: Row(
+        children: [
+          Container(
+            width: 28,
+            height: 28,
+            alignment: Alignment.center,
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              color: colorScheme.primary.withValues(alpha: 0.16),
+            ),
+            child: Text(
+              '$number',
+              style: context.textTheme.labelLarge?.copyWith(
+                color: colorScheme.primary,
+                fontWeight: FontWeight.w800,
+              ),
+            ),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Text(
+              text,
+              style: context.textTheme.bodyMedium?.copyWith(height: 1.35),
+            ),
+          ),
+        ],
+      ),
     );
   }
 }

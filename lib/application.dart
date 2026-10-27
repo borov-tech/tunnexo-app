@@ -10,6 +10,7 @@ import 'package:flclashx/manager/manager.dart';
 import 'package:flclashx/plugins/app.dart';
 import 'package:flclashx/providers/providers.dart';
 import 'package:flclashx/state.dart';
+import 'package:flclashx/widgets/tunnexo_splash.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_displaymode/flutter_displaymode.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
@@ -132,7 +133,7 @@ class ApplicationState extends ConsumerState<Application> {
 
   Widget _buildApp(Widget child) => MessageManager(
         child: ThemeManager(
-          child: child,
+          child: TunnexoSplash(child: child),
         ),
       );
 

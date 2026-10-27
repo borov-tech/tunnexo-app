@@ -1,0 +1,40 @@
+name: check
+
+# Fast compile check of the Dart code (no native build).
+on:
+  workflow_dispatch:
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+jobs:
+  analyze:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: "3.41.7"
+          cache: true
+
+      - name: Get Flutter dependencies
+        run: flutter pub get
+
+      - name: Analyze
+        run: |
+          flutter analyze --no-fatal-infos --no-fatal-warnings lib 2>&1 | tee analyze.log
+          code=${PIPESTATUS[0]}
+          errs=$(grep -E '^\s*error' analyze.log | head -40 | sed 's/%/%25/g' | sed ':a;N;$!ba;s/\n/%0A/g')
+          if [ -n "$errs" ] || [ "$code" -ne 0 ]; then
+            echo "::error title=Analyzer errors::$errs"
+            tail_=$(tail -40 analyze.log | sed 's/%/%25/g' | sed ':a;N;$!ba;s/\n/%0A/g')
+            echo "::error title=Analyzer tail::$tail_"
+            exit 1
+          fi
+          warns=$(grep -E '^\s*warning' analyze.log | grep -E 'hero_connect|tunnexo_splash|subscription_notification|application.dart' | head -30 | sed 's/%/%25/g' | sed ':a;N;$!ba;s/\n/%0A/g')
+          [ -n "$warns" ] && echo "::warning title=Warnings in changed files::$warns"
+          exit 0

@@ -9,6 +9,7 @@ import 'package:flclashx/models/models.dart';
 import 'package:flutter/material.dart';
 
 const appName = "Tunnexo";
+const tunnexoBotUrl = "https://t.me/tunnexo_vpn_bot";
 const appHelperService = "TunnexoHelperService";
 const coreName = "clashx.meta";
 const browserUa =
