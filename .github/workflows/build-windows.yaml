@@ -4,6 +4,11 @@ name: build-windows
 # Выпуск версии: тег vX.Y.Z — установщик прикрепляется к Release.
 on:
   workflow_dispatch:
+    inputs:
+      release_tag:
+        description: "Опубликовать как версию (например v0.4.2). Пусто — только сборка."
+        required: false
+        default: ""
   push:
     tags:
       - "v*"
@@ -81,7 +86,11 @@ jobs:
           retention-days: 30
 
       - name: Attach to Release
-        if: startsWith(github.ref, 'refs/tags/v')
+        if: startsWith(github.ref, 'refs/tags/v') || inputs.release_tag != ''
         uses: softprops/action-gh-release@v2
         with:
+          tag_name: ${{ inputs.release_tag || github.ref_name }}
+          name: Tunnexo ${{ inputs.release_tag || github.ref_name }}
+          target_commitish: ${{ github.sha }}
+          make_latest: true
           files: ./dist/*
