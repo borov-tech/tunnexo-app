@@ -138,6 +138,10 @@ class _HomePageViewState extends ConsumerState<_HomePageView> {
   Widget build(BuildContext context) {
     final navigationItems = ref.watch(currentNavigationsStateProvider).value;
     final currentLabel = ref.watch(currentPageLabelProvider);
+    // When pages slide (mobile + "animate to page" setting) they already move;
+    // otherwise the new page gently fades/slides in instead of popping in.
+    final slides = ref.watch(appSettingProvider.select((s) => s.isAnimateToPage)) &&
+        ref.watch(isMobileViewProvider);
     return PageView.builder(
       controller: _pageController,
       physics: const NeverScrollableScrollPhysics(),
@@ -147,10 +151,14 @@ class _HomePageViewState extends ConsumerState<_HomePageView> {
         final isActive = navigationItem.label == currentLabel;
         return ExcludeFocus(
           excluding: !isActive,
-          child: KeepScope(
-            keep: navigationItem.keep,
-            key: Key(navigationItem.label.name),
-            child: navigationItem.view,
+          child: _PageEnter(
+            active: isActive,
+            enabled: !slides,
+            child: KeepScope(
+              keep: navigationItem.keep,
+              key: Key(navigationItem.label.name),
+              child: navigationItem.view,
+            ),
           ),
         );
       },
@@ -381,4 +389,57 @@ class HomeBackScope extends StatelessWidget {
     }
     return child;
   }
+}
+
+class _PageEnter extends StatefulWidget {
+  const _PageEnter({
+    required this.active,
+    required this.enabled,
+    required this.child,
+  });
+
+  final bool active;
+  final bool enabled;
+  final Widget child;
+
+  @override
+  State<_PageEnter> createState() => _PageEnterState();
+}
+
+class _PageEnterState extends State<_PageEnter>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _c = AnimationController(
+    vsync: this,
+    duration: const Duration(milliseconds: 280),
+    value: 1,
+  );
+  late final Animation<double> _curve =
+      CurvedAnimation(parent: _c, curve: Curves.easeOutCubic);
+
+  @override
+  void didUpdateWidget(_PageEnter oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    final reduce = MediaQuery.maybeDisableAnimationsOf(context) ?? false;
+    if (widget.active && !oldWidget.active && widget.enabled && !reduce) {
+      _c.forward(from: 0);
+    }
+  }
+
+  @override
+  void dispose() {
+    _c.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) => FadeTransition(
+        opacity: _curve,
+        child: SlideTransition(
+          position: Tween<Offset>(
+            begin: const Offset(0.04, 0),
+            end: Offset.zero,
+          ).animate(_curve),
+          child: widget.child,
+        ),
+      );
 }

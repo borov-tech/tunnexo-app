@@ -236,7 +236,12 @@ class AppController {
   }
 
   Future<void> addProfile(Profile profile) async {
+    final isFirst = _ref.read(profilesProvider).isEmpty;
     _ref.read(profilesProvider.notifier).setProfile(profile);
+    if (isFirst) {
+      globalState.firstProfileAddedAt.value = DateTime.now();
+      toPage(PageLabel.dashboard);
+    }
     if (_ref.read(currentProfileIdProvider) != null) return;
     // Setting currentProfileId drives needSetupProvider → clash_manager →
     // handleChangeProfile() → applyProfile(), so an explicit apply here would

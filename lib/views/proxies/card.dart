@@ -41,7 +41,7 @@ class ProxyCard extends StatelessWidget {
             proxyName: proxy.name,
             testUrl: testUrl,
           ));
-          return delay == 0 || delay == null
+          final Widget value = delay == 0 || delay == null
               ? SizedBox(
                   height: measure.labelSmallHeight,
                   width: measure.labelSmallHeight,
@@ -68,6 +68,33 @@ class ProxyCard extends StatelessWidget {
                     ),
                   ),
                 );
+          // The result pops in from below when a measurement finishes.
+          return AnimatedSwitcher(
+            duration: const Duration(milliseconds: 320),
+            switchInCurve: Curves.easeOutCubic,
+            layoutBuilder: (current, previous) => Stack(
+              alignment: Alignment.centerRight,
+              children: [...previous, if (current != null) current],
+            ),
+            transitionBuilder: (child, animation) => FadeTransition(
+              opacity: animation,
+              child: SlideTransition(
+                position: Tween<Offset>(
+                  begin: const Offset(0, 0.6),
+                  end: Offset.zero,
+                ).animate(animation),
+                child: child,
+              ),
+            ),
+            child: KeyedSubtree(
+              key: ValueKey(delay == 0
+                  ? 'testing'
+                  : delay == null
+                      ? 'none'
+                      : 'value'),
+              child: value,
+            ),
+          );
         },
       ),
     );
@@ -213,6 +240,22 @@ class ProxyCard extends StatelessWidget {
             ),
           ),
         ),
+        // Light wave sweeping over the card while its delay is being tested.
+        Positioned.fill(
+          child: IgnorePointer(
+            child: Consumer(
+              builder: (_, ref, __) {
+                final delay = ref.watch(getDelayProvider(
+                  proxyName: proxy.name,
+                  testUrl: testUrl,
+                ));
+                return delay == 0
+                    ? const _TestingSweep()
+                    : const SizedBox.shrink();
+              },
+            ),
+          ),
+        ),
         if (groupType.isComputedSelected)
           Positioned(
             top: 0,
@@ -284,6 +327,79 @@ class _ProxyComputedMark extends ConsumerWidget {
           color: Theme.of(context).colorScheme.secondaryContainer,
         ),
         child: const SelectIcon(),
+      ),
+    );
+  }
+}
+
+// A soft highlight that sweeps across a proxy card while its delay is tested.
+// All cards share one clock and are phase-shifted by their vertical position,
+// so a list being tested shows a wave running from top to bottom.
+class _TestingSweep extends StatefulWidget {
+  const _TestingSweep();
+
+  @override
+  State<_TestingSweep> createState() => _TestingSweepState();
+}
+
+class _TestingSweepState extends State<_TestingSweep>
+    with SingleTickerProviderStateMixin {
+  static const _period = 1400;
+  late final AnimationController _tick = AnimationController(
+    vsync: this,
+    duration: const Duration(milliseconds: _period),
+  );
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final reduce = MediaQuery.maybeDisableAnimationsOf(context) ?? false;
+    if (!reduce && !_tick.isAnimating) _tick.repeat();
+  }
+
+  @override
+  void dispose() {
+    _tick.dispose();
+    super.dispose();
+  }
+
+  double _phase() {
+    var dy = 0.0;
+    final box = context.findRenderObject();
+    if (box is RenderBox && box.hasSize && box.attached) {
+      dy = box.localToGlobal(Offset.zero).dy;
+    }
+    final now = DateTime.now().millisecondsSinceEpoch;
+    final t = (now % _period) / _period - dy / 900;
+    return t - t.floorToDouble();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (!_tick.isAnimating) return const SizedBox.shrink();
+    final color = context.colorScheme.primary;
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(12),
+      child: AnimatedBuilder(
+        animation: _tick,
+        builder: (_, __) {
+          final p = _phase();
+          return FractionalTranslation(
+            translation: Offset(-1.2 + 2.4 * p, 0),
+            child: DecoratedBox(
+              decoration: BoxDecoration(
+                gradient: LinearGradient(
+                  colors: [
+                    color.withValues(alpha: 0),
+                    color.withValues(alpha: 0.16),
+                    color.withValues(alpha: 0),
+                  ],
+                  stops: const [0.25, 0.5, 0.75],
+                ),
+              ),
+            ),
+          );
+        },
       ),
     );
   }

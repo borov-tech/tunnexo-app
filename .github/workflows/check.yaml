@@ -35,6 +35,6 @@ jobs:
             echo "::error title=Analyzer tail::$tail_"
             exit 1
           fi
-          warns=$(grep -E '^\s*warning' analyze.log | grep -E 'hero_connect|tunnexo_splash|subscription_notification|application.dart' | head -30 | sed 's/%/%25/g' | sed ':a;N;$!ba;s/\n/%0A/g')
+          warns=$(grep -E '^\s*warning' analyze.log | grep -E "hero_connect|tunnexo_splash|subscription_notification|application.dart|rolling_text|proxies/card|pages/home|controller.dart|state.dart" | head -30 | sed 's/%/%25/g' | sed ':a;N;$!ba;s/\n/%0A/g')
           [ -n "$warns" ] && echo "::warning title=Warnings in changed files::$warns"
           exit 0

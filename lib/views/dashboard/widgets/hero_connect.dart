@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'dart:math' as math;
 
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flclashx/common/common.dart';
@@ -9,6 +10,7 @@ import 'package:flclashx/models/models.dart';
 import 'package:flclashx/providers/providers.dart';
 import 'package:flclashx/state.dart';
 import 'package:flclashx/views/profiles/add_profile.dart';
+import 'package:flclashx/widgets/rolling_text.dart';
 import 'package:flclashx/widgets/widgets.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -36,6 +38,25 @@ void _showHeroToast(String text) {
     _heroToast.value = null;
   });
 }
+
+// Connect failed: red button + hint above it, cleared after a while or on the
+// next tap.
+final _heroError = ValueNotifier<bool>(false);
+Timer? _heroErrorTimer;
+
+void _setHeroError(bool value) {
+  _heroErrorTimer?.cancel();
+  _heroError.value = value;
+  if (value) {
+    _heroErrorTimer = Timer(const Duration(seconds: 7), () {
+      _heroError.value = false;
+    });
+  }
+}
+
+// True for a few seconds after the first subscription was added: the connect
+// button pulses to show what to press next.
+final _heroDone = ValueNotifier<bool>(false);
 
 // Tunnexo strings are Russian-first; English only when the app runs in English.
 bool get _isEn => Intl.getCurrentLocale().toLowerCase().startsWith('en');
@@ -342,6 +363,7 @@ class HeroConnect extends ConsumerWidget {
     return Column(
       children: [
         Expanded(
+          child: _DoneSwitch(
           child: SingleChildScrollView(
             child: Column(
               children: [
@@ -394,6 +416,7 @@ class HeroConnect extends ConsumerWidget {
               ],
             ),
           ),
+          ),
         ),
         // Pinned to the bottom of the hero, just above the nav bar.
         const SizedBox(height: 14),
@@ -401,6 +424,12 @@ class HeroConnect extends ConsumerWidget {
           clipBehavior: Clip.none,
           children: [
             _ConnectButton(isReady: isReady, protectedName: displayName),
+            const Positioned(
+              left: 0,
+              right: 0,
+              bottom: 54 + 12,
+              child: IgnorePointer(child: _ErrorHint()),
+            ),
             const Positioned(
               left: 0,
               right: 0,
@@ -492,16 +521,21 @@ class _TrafficCard extends StatelessWidget {
           Row(
             children: [
               Expanded(
-                child: Text(
-                  unlimited
-                      ? _formatBytes(used)
-                      : '${_formatBytes(used)} / ${_formatBytes(total)}',
-                  style: context.textTheme.titleMedium?.copyWith(
-                    fontWeight: FontWeight.w700,
-                    fontFamily: FontFamily.jetBrainsMono.value,
+                child: Align(
+                  alignment: Alignment.centerLeft,
+                  child: FittedBox(
+                    fit: BoxFit.scaleDown,
+                    alignment: Alignment.centerLeft,
+                    child: RollingText(
+                      unlimited
+                          ? _formatBytes(used)
+                          : '${_formatBytes(used)} / ${_formatBytes(total)}',
+                      style: context.textTheme.titleMedium?.copyWith(
+                        fontWeight: FontWeight.w700,
+                        fontFamily: FontFamily.jetBrainsMono.value,
+                      ),
+                    ),
                   ),
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
                 ),
               ),
               if (daysLeft != null) ...[
@@ -821,13 +855,15 @@ class _ServerPanel extends ConsumerWidget {
                       _SignalBars(delay: delay, serverName: serverName),
                       if (delay != null && delay > 0) ...[
                         const SizedBox(height: 3),
-                        Text(
-                          '$delay ms',
-                          textAlign: TextAlign.center,
-                          style: context.textTheme.labelSmall?.copyWith(
-                            color: utils.getDelayColor(delay) ?? colorScheme.onSurfaceVariant,
-                            fontWeight: FontWeight.w600,
-                            fontFamily: FontFamily.jetBrainsMono.value,
+                        FittedBox(
+                          fit: BoxFit.scaleDown,
+                          child: RollingText(
+                            '$delay ms',
+                            style: context.textTheme.labelSmall?.copyWith(
+                              color: utils.getDelayColor(delay) ?? colorScheme.onSurfaceVariant,
+                              fontWeight: FontWeight.w600,
+                              fontFamily: FontFamily.jetBrainsMono.value,
+                            ),
                           ),
                         ),
                       ],
@@ -1061,21 +1097,29 @@ class _SignalBars extends StatelessWidget {
 // ----------------------------------------------------------------------------
 // Logo rings — soft rings expand from the logo while connecting
 // ----------------------------------------------------------------------------
-class _LogoWithRings extends StatefulWidget {
+class _LogoWithRings extends ConsumerStatefulWidget {
   const _LogoWithRings({required this.child});
 
   final Widget child;
 
   @override
-  State<_LogoWithRings> createState() => _LogoWithRingsState();
+  ConsumerState<_LogoWithRings> createState() => _LogoWithRingsState();
 }
 
-class _LogoWithRingsState extends State<_LogoWithRings>
-    with SingleTickerProviderStateMixin {
+class _LogoWithRingsState extends ConsumerState<_LogoWithRings>
+    with TickerProviderStateMixin {
+  // Outward rings while connecting.
   late final AnimationController _c = AnimationController(
     vsync: this,
     duration: const Duration(milliseconds: 1800),
   );
+  // Rings collapsing back into the logo on disconnect (one shot).
+  late final AnimationController _inward = AnimationController(
+    vsync: this,
+    duration: const Duration(milliseconds: 750),
+  )..addStatusListener((status) {
+      if (status == AnimationStatus.completed && mounted) setState(() {});
+    });
   bool _reduce = false;
 
   @override
@@ -1112,11 +1156,21 @@ class _LogoWithRingsState extends State<_LogoWithRings>
   void dispose() {
     _heroConnecting.removeListener(_sync);
     _c.dispose();
+    _inward.dispose();
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
+    ref.listen<bool>(runTimeProvider.select((value) => value != null),
+        (prev, next) {
+      if (prev == true && !next && !_reduce) {
+        _inward.forward(from: 0);
+        setState(() {});
+      }
+    });
+    final connected =
+        ref.watch(runTimeProvider.select((value) => value != null));
     final color = context.colorScheme.primary;
     return SizedBox(
       width: 104,
@@ -1136,11 +1190,62 @@ class _LogoWithRingsState extends State<_LogoWithRings>
                 ),
               ),
             ),
-          widget.child,
+          if (_inward.isAnimating)
+            Positioned.fill(
+              child: IgnorePointer(
+                child: AnimatedBuilder(
+                  animation: _inward,
+                  builder: (_, __) => CustomPaint(
+                    painter:
+                        _InwardRingsPainter(t: _inward.value, color: color),
+                  ),
+                ),
+              ),
+            ),
+          // Slightly dimmed while idle: "lights up" when the tunnel is on.
+          AnimatedOpacity(
+            opacity: connected || _heroConnecting.value ? 1 : 0.82,
+            duration: const Duration(milliseconds: 500),
+            child: widget.child,
+          ),
         ],
       ),
     );
   }
+}
+
+class _InwardRingsPainter extends CustomPainter {
+  _InwardRingsPainter({required this.t, required this.color});
+
+  final double t;
+  final Color color;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final center = size.center(Offset.zero);
+    for (var i = 0; i < 3; i++) {
+      final p = ((t - i * 0.12) / 0.76).clamp(0.0, 1.0);
+      if (p <= 0 || p >= 1) continue;
+      final scale = 1.9 - 0.9 * Curves.easeInCubic.transform(p);
+      final alpha = 0.7 * math.sin(p * math.pi);
+      final rect = Rect.fromCenter(
+        center: center,
+        width: size.width * scale,
+        height: size.height * scale,
+      );
+      canvas.drawRRect(
+        RRect.fromRectAndRadius(rect, Radius.circular(26 * scale)),
+        Paint()
+          ..style = PaintingStyle.stroke
+          ..strokeWidth = 2
+          ..color = color.withValues(alpha: alpha),
+      );
+    }
+  }
+
+  @override
+  bool shouldRepaint(_InwardRingsPainter oldDelegate) =>
+      oldDelegate.t != t || oldDelegate.color != color;
 }
 
 class _RingsPainter extends CustomPainter {
@@ -1253,10 +1358,20 @@ class _ConnectButton extends ConsumerStatefulWidget {
 }
 
 class _ConnectButtonState extends ConsumerState<_ConnectButton>
-    with SingleTickerProviderStateMixin {
+    with TickerProviderStateMixin {
   late final AnimationController _shimmer = AnimationController(
     vsync: this,
     duration: const Duration(milliseconds: 1300),
+  );
+  // Short horizontal shake when connecting failed.
+  late final AnimationController _shake = AnimationController(
+    vsync: this,
+    duration: const Duration(milliseconds: 480),
+  );
+  // Soft pulsing halo after the first subscription was added ("press me").
+  late final AnimationController _glow = AnimationController(
+    vsync: this,
+    duration: const Duration(milliseconds: 1400),
   );
   bool _pressed = false;
 
@@ -1264,12 +1379,18 @@ class _ConnectButtonState extends ConsumerState<_ConnectButton>
   void initState() {
     super.initState();
     _heroConnecting.addListener(_onConnecting);
+    _heroError.addListener(_onFlags);
+    _heroDone.addListener(_onDone);
   }
 
   @override
   void dispose() {
     _heroConnecting.removeListener(_onConnecting);
+    _heroError.removeListener(_onFlags);
+    _heroDone.removeListener(_onDone);
     _shimmer.dispose();
+    _shake.dispose();
+    _glow.dispose();
     super.dispose();
   }
 
@@ -1285,12 +1406,30 @@ class _ConnectButtonState extends ConsumerState<_ConnectButton>
     setState(() {});
   }
 
+  void _onFlags() {
+    if (mounted) setState(() {});
+  }
+
+  void _onDone() {
+    if (!mounted) return;
+    if (_heroDone.value && !_reduceMotion(context)) {
+      _glow.repeat();
+    } else {
+      _glow
+        ..stop()
+        ..reset();
+    }
+    setState(() {});
+  }
+
   void _setPressed(bool value) {
     if (_pressed != value && mounted) setState(() => _pressed = value);
   }
 
   Future<void> _toggle(bool isStart) async {
     if (_heroConnecting.value) return;
+    _setHeroError(false);
+    _heroDone.value = false;
     if (Platform.isAndroid) {
       HapticFeedback.mediumImpact();
     }
@@ -1301,7 +1440,8 @@ class _ConnectButtonState extends ConsumerState<_ConnectButton>
     _heroConnecting.value = true;
     final began = DateTime.now();
     try {
-      await globalState.appController.updateStatus(true)
+      await globalState.appController
+          .updateStatus(true)
           .timeout(const Duration(seconds: 30));
     } catch (_) {
       // Errors are surfaced by the controller itself.
@@ -1312,7 +1452,15 @@ class _ConnectButtonState extends ConsumerState<_ConnectButton>
     if (spent < minShow) await Future<void>.delayed(minShow - spent);
     _heroConnecting.value = false;
     if (!mounted) return;
-    if (ref.read(runTimeProvider) == null) return;
+    if (ref.read(runTimeProvider) == null) {
+      // Bring-up failed: shake, turn red and explain what to do.
+      _setHeroError(true);
+      if (!_reduceMotion(context)) _shake.forward(from: 0);
+      if (Platform.isAndroid) {
+        HapticFeedback.heavyImpact();
+      }
+      return;
+    }
     final name = widget.protectedName.trim();
     final word = _isEn ? 'Protected' : 'Защищено';
     _showHeroToast(name.isEmpty ? word : '$word · $name');
@@ -1327,6 +1475,7 @@ class _ConnectButtonState extends ConsumerState<_ConnectButton>
     final runTime = ref.watch(runTimeProvider);
     final isStart = runTime != null;
     final connecting = _heroConnecting.value && !isStart;
+    final failed = _heroError.value && !isStart && !connecting;
     final isReady = widget.isReady;
 
     final Color bg;
@@ -1339,6 +1488,9 @@ class _ConnectButtonState extends ConsumerState<_ConnectButton>
       bg = Color.lerp(colorScheme.primary, colorScheme.surface, 0.72)!;
       fg = Color.lerp(colorScheme.primary, Colors.white, 0.45)!;
       border = Border.all(color: colorScheme.primary.withValues(alpha: 0.45));
+    } else if (failed) {
+      bg = const Color(0xFFC62828);
+      fg = Colors.white;
     } else if (isStart) {
       bg = colorScheme.surfaceContainerHigh.withValues(alpha: 0.8);
       fg = colorScheme.primary;
@@ -1348,19 +1500,30 @@ class _ConnectButtonState extends ConsumerState<_ConnectButton>
       fg = colorScheme.onPrimary;
     }
 
+    final labelStyle = context.textTheme.titleSmall?.copyWith(
+      color: fg,
+      fontWeight: FontWeight.w700,
+      letterSpacing: 0.3,
+    );
     final Widget content;
     if (connecting) {
       content = Text(
         _isEn ? 'Connecting…' : 'Подключение…',
         key: const ValueKey('connecting'),
-        style: context.textTheme.titleSmall?.copyWith(
-          color: fg,
-          fontWeight: FontWeight.w700,
-          letterSpacing: 0.3,
-        ),
+        style: labelStyle,
+      );
+    } else if (failed) {
+      content = Row(
+        key: const ValueKey('failed'),
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(Icons.refresh_rounded, size: 20, color: fg),
+          const SizedBox(width: 8),
+          Text(_isEn ? 'Try again' : 'Попробовать снова', style: labelStyle),
+        ],
       );
     } else if (isStart) {
-      content = Text(
+      content = RollingText(
         utils.getTimeText(runTime),
         key: const ValueKey('on'),
         style: context.textTheme.titleSmall?.copyWith(
@@ -1379,6 +1542,62 @@ class _ConnectButtonState extends ConsumerState<_ConnectButton>
       );
     }
 
+    final button = AnimatedScale(
+      scale: _pressed ? 0.96 : 1,
+      duration: const Duration(milliseconds: 120),
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 300),
+        width: double.infinity,
+        height: 54,
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(24),
+          color: bg,
+          border: border,
+        ),
+        child: ClipRRect(
+          borderRadius: BorderRadius.circular(23),
+          child: Stack(
+            fit: StackFit.expand,
+            children: [
+              if (connecting && _shimmer.isAnimating)
+                AnimatedBuilder(
+                  animation: _shimmer,
+                  builder: (_, __) => FractionalTranslation(
+                    translation: Offset(-1 + 2 * _shimmer.value, 0),
+                    child: DecoratedBox(
+                      decoration: BoxDecoration(
+                        gradient: LinearGradient(
+                          colors: [
+                            Colors.white.withValues(alpha: 0),
+                            Colors.white.withValues(alpha: 0.16),
+                            Colors.white.withValues(alpha: 0),
+                          ],
+                          stops: const [0.3, 0.5, 0.7],
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+              Center(
+                child: AnimatedSwitcher(
+                  duration: const Duration(milliseconds: 280),
+                  transitionBuilder: (child, animation) => FadeTransition(
+                    opacity: animation,
+                    child: ScaleTransition(
+                      scale:
+                          Tween<double>(begin: 0.8, end: 1).animate(animation),
+                      child: child,
+                    ),
+                  ),
+                  child: content,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+
     return _FocusableTap(
       autofocus: true,
       borderRadius: 24,
@@ -1387,64 +1606,345 @@ class _ConnectButtonState extends ConsumerState<_ConnectButton>
         onPointerDown: (_) => _setPressed(isReady),
         onPointerUp: (_) => _setPressed(false),
         onPointerCancel: (_) => _setPressed(false),
-        child: AnimatedScale(
-          scale: _pressed ? 0.96 : 1,
-          duration: const Duration(milliseconds: 120),
-          child: AnimatedContainer(
-            duration: const Duration(milliseconds: 300),
-            width: double.infinity,
-            height: 54,
-            decoration: BoxDecoration(
-              borderRadius: BorderRadius.circular(24),
-              color: bg,
-              border: border,
-            ),
-            child: ClipRRect(
-              borderRadius: BorderRadius.circular(23),
-              child: Stack(
-                fit: StackFit.expand,
-                children: [
-                  if (connecting && _shimmer.isAnimating)
-                    AnimatedBuilder(
-                      animation: _shimmer,
-                      builder: (_, __) => FractionalTranslation(
-                        translation: Offset(-1 + 2 * _shimmer.value, 0),
-                        child: DecoratedBox(
-                          decoration: BoxDecoration(
-                            gradient: LinearGradient(
-                              colors: [
-                                Colors.white.withValues(alpha: 0),
-                                Colors.white.withValues(alpha: 0.16),
-                                Colors.white.withValues(alpha: 0),
-                              ],
-                              stops: const [0.3, 0.5, 0.7],
-                            ),
+        child: AnimatedBuilder(
+          animation: Listenable.merge([_shake, _glow]),
+          builder: (_, child) {
+            final s = _shake.value;
+            final dx = _shake.isAnimating
+                ? math.sin(s * math.pi * 6) * 9 * (1 - s)
+                : 0.0;
+            final g = _glow.isAnimating ? math.sin(_glow.value * math.pi) : 0.0;
+            return Transform.translate(
+              offset: Offset(dx, 0),
+              child: DecoratedBox(
+                decoration: BoxDecoration(
+                  borderRadius: BorderRadius.circular(24),
+                  boxShadow: g > 0
+                      ? [
+                          BoxShadow(
+                            color: colorScheme.primary
+                                .withValues(alpha: 0.4 * g),
+                            spreadRadius: 7 * g,
                           ),
-                        ),
-                      ),
-                    ),
-                  Center(
-                    child: AnimatedSwitcher(
-                      duration: const Duration(milliseconds: 260),
-                      transitionBuilder: (child, animation) => FadeTransition(
-                        opacity: animation,
-                        child: ScaleTransition(
-                          scale: Tween<double>(begin: 0.85, end: 1)
-                              .animate(animation),
-                          child: child,
-                        ),
-                      ),
-                      child: content,
-                    ),
-                  ),
-                ],
+                        ]
+                      : null,
+                ),
+                child: child,
               ),
+            );
+          },
+          child: button,
+        ),
+      ),
+    );
+  }
+}
+
+// ----------------------------------------------------------------------------
+// "Couldn't connect" hint above the button
+// ----------------------------------------------------------------------------
+class _ErrorHint extends StatelessWidget {
+  const _ErrorHint();
+
+  @override
+  Widget build(BuildContext context) {
+    final en = _isEn;
+    return ValueListenableBuilder<bool>(
+      valueListenable: _heroError,
+      builder: (_, visible, __) => AnimatedSlide(
+        offset: visible ? Offset.zero : const Offset(0, 0.25),
+        duration: const Duration(milliseconds: 280),
+        curve: Curves.easeOutCubic,
+        child: AnimatedOpacity(
+          opacity: visible ? 1 : 0,
+          duration: const Duration(milliseconds: 240),
+          child: Container(
+            padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
+            decoration: BoxDecoration(
+              color: const Color(0xF25A1010),
+              borderRadius: BorderRadius.circular(16),
+              border: Border.all(
+                  color: const Color(0xFFEF5350).withValues(alpha: 0.55)),
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.black.withValues(alpha: 0.35),
+                  blurRadius: 18,
+                  offset: const Offset(0, 6),
+                ),
+              ],
+            ),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Icon(Icons.error_outline_rounded,
+                    size: 22, color: Color(0xFFFF8A80)),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text(
+                        en ? 'Could not connect' : 'Не удалось подключиться',
+                        style: context.textTheme.titleSmall?.copyWith(
+                          color: Colors.white,
+                          fontWeight: FontWeight.w800,
+                        ),
+                      ),
+                      const SizedBox(height: 3),
+                      Text(
+                        en
+                            ? 'Check your internet and tap the button again. '
+                                'Still failing — tap “Update” or pick another country.'
+                            : 'Проверьте интернет и нажмите кнопку ещё раз. '
+                                'Не помогает — нажмите «Обновить» или выберите другую страну.',
+                        style: context.textTheme.bodySmall?.copyWith(
+                          color: const Color(0xFFF3D2C8),
+                          height: 1.4,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
             ),
           ),
         ),
       ),
     );
   }
+}
+
+// ----------------------------------------------------------------------------
+// "Done!" after the first subscription was added
+// ----------------------------------------------------------------------------
+class _DoneSwitch extends StatefulWidget {
+  const _DoneSwitch({required this.child});
+
+  final Widget child;
+
+  @override
+  State<_DoneSwitch> createState() => _DoneSwitchState();
+}
+
+class _DoneSwitchState extends State<_DoneSwitch> {
+  bool _show = false;
+  Timer? _timer;
+
+  @override
+  void initState() {
+    super.initState();
+    final at = globalState.firstProfileAddedAt.value;
+    if (at != null &&
+        DateTime.now().difference(at) < const Duration(seconds: 5)) {
+      _show = true;
+      _arm();
+    }
+    globalState.firstProfileAddedAt.addListener(_onAdded);
+  }
+
+  void _onAdded() {
+    if (!mounted || globalState.firstProfileAddedAt.value == null) return;
+    setState(() => _show = true);
+    _arm();
+  }
+
+  void _arm() {
+    _timer?.cancel();
+    _timer = Timer(const Duration(milliseconds: 3800), _hide);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (_show) _heroDone.value = true;
+    });
+  }
+
+  void _hide() {
+    _timer?.cancel();
+    if (mounted && _show) setState(() => _show = false);
+    // Keep the button halo a little longer than the "Done!" card.
+    Timer(const Duration(milliseconds: 2400), () => _heroDone.value = false);
+  }
+
+  @override
+  void dispose() {
+    _timer?.cancel();
+    globalState.firstProfileAddedAt.removeListener(_onAdded);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _heroDone.value = false;
+    });
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) => AnimatedSwitcher(
+        duration: const Duration(milliseconds: 450),
+        switchInCurve: Curves.easeOutCubic,
+        switchOutCurve: Curves.easeInCubic,
+        layoutBuilder: (current, previous) => Stack(
+          fit: StackFit.expand,
+          children: [...previous, if (current != null) current],
+        ),
+        child: _show
+            ? GestureDetector(
+                key: const ValueKey('done'),
+                behavior: HitTestBehavior.opaque,
+                onTap: _hide,
+                child: const _DoneView(),
+              )
+            : KeyedSubtree(key: const ValueKey('main'), child: widget.child),
+      );
+}
+
+class _DoneView extends StatefulWidget {
+  const _DoneView();
+
+  @override
+  State<_DoneView> createState() => _DoneViewState();
+}
+
+class _DoneViewState extends State<_DoneView>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _c = AnimationController(
+    vsync: this,
+    duration: const Duration(milliseconds: 1300),
+  );
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    if (_c.isAnimating || _c.value > 0) return;
+    if (_reduceMotion(context)) {
+      _c.value = 1;
+    } else {
+      _c.forward();
+    }
+  }
+
+  @override
+  void dispose() {
+    _c.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final colorScheme = context.colorScheme;
+    final en = _isEn;
+    return Center(
+      child: AnimatedBuilder(
+        animation: _c,
+        builder: (context, _) {
+          final t = _c.value;
+          double seg(double a, double b) => ((t - a) / (b - a)).clamp(0.0, 1.0);
+          final title = Curves.easeOut.transform(seg(0.5, 0.75));
+          final sub = Curves.easeOut.transform(seg(0.62, 0.88));
+          return Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              CustomPaint(
+                size: const Size(132, 132),
+                painter: _CheckPainter(
+                  t: t,
+                  ring: colorScheme.primary,
+                  tick: colorScheme.onSurface,
+                ),
+              ),
+              const SizedBox(height: 18),
+              Opacity(
+                opacity: title,
+                child: Transform.translate(
+                  offset: Offset(0, 12 * (1 - title)),
+                  child: Text(
+                    en ? 'Done!' : 'Готово!',
+                    style: context.textTheme.headlineMedium
+                        ?.copyWith(fontWeight: FontWeight.w800),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 8),
+              Opacity(
+                opacity: sub,
+                child: Transform.translate(
+                  offset: Offset(0, 12 * (1 - sub)),
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 24),
+                    child: Text(
+                      en
+                          ? 'Subscription added — tap the connect button'
+                          : 'Подписка добавлена — нажмите кнопку подключения',
+                      textAlign: TextAlign.center,
+                      style: context.textTheme.bodyLarge?.copyWith(
+                        color: colorScheme.onSurfaceVariant,
+                        height: 1.4,
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          );
+        },
+      ),
+    );
+  }
+}
+
+class _CheckPainter extends CustomPainter {
+  _CheckPainter({required this.t, required this.ring, required this.tick});
+
+  final double t;
+  final Color ring;
+  final Color tick;
+
+  static double _seg(double t, double a, double b) =>
+      ((t - a) / (b - a)).clamp(0.0, 1.0);
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final s = size.width / 120;
+    canvas.save();
+    canvas.scale(s);
+    const c = Offset(60, 60);
+    final pop = Curves.easeOutBack.transform(_seg(t, 0.15, 0.4));
+    if (pop > 0) {
+      canvas.drawCircle(
+          c, 54 * pop, Paint()..color = ring.withValues(alpha: 0.16));
+    }
+    final arc = Curves.easeOutCubic.transform(_seg(t, 0.0, 0.35));
+    if (arc > 0) {
+      canvas.drawArc(
+        Rect.fromCircle(center: c, radius: 52),
+        -math.pi / 2,
+        2 * math.pi * arc,
+        false,
+        Paint()
+          ..style = PaintingStyle.stroke
+          ..strokeWidth = 6
+          ..strokeCap = StrokeCap.round
+          ..color = ring,
+      );
+    }
+    final k = Curves.easeOutCubic.transform(_seg(t, 0.32, 0.6));
+    if (k > 0) {
+      final path = Path()
+        ..moveTo(38, 62)
+        ..lineTo(54, 78)
+        ..lineTo(84, 46);
+      final metric = path.computeMetrics().first;
+      canvas.drawPath(
+        metric.extractPath(0, metric.length * k),
+        Paint()
+          ..style = PaintingStyle.stroke
+          ..strokeWidth = 7
+          ..strokeCap = StrokeCap.round
+          ..strokeJoin = StrokeJoin.round
+          ..color = tick,
+      );
+    }
+    canvas.restore();
+  }
+
+  @override
+  bool shouldRepaint(_CheckPainter oldDelegate) => oldDelegate.t != t;
 }
 
 // ----------------------------------------------------------------------------

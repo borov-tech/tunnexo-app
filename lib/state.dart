@@ -96,6 +96,9 @@ class GlobalState {
   // sort alphabetically instead of following the config.
   final proxyGroupOrder = ValueNotifier<List<String>>([]);
   final navigatorKey = GlobalKey<NavigatorState>();
+  /// Set when the very first subscription is added — the dashboard shows a
+  /// short "Done!" confirmation for it.
+  final firstProfileAddedAt = ValueNotifier<DateTime?>(null);
   AppController? _appController;
   GlobalKey<CommonScaffoldState> homeScaffoldKey = GlobalKey();
   bool isInit = false;
