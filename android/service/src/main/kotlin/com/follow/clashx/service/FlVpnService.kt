@@ -358,7 +358,7 @@ class FlVpnService : VpnService(), IBaseService {
     override suspend fun handleStart(options: VpnOptions) {
         State.options = options
         val builder = Builder()
-            .setSession("FlClashX")
+            .setSession("Tunnexo")
         // Tunnel DNS comes from the core (it derives the in-tunnel resolver address from
         // the active config and hijacks :53 to it, resolving via the config's dns section)
         // — never a hardcoded public DNS. Fall back only to the standard in-tun resolver.

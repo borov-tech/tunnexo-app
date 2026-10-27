@@ -45,7 +45,7 @@ android {
     }
 
     defaultConfig {
-        applicationId = "com.follow.clashx"
+        applicationId = "com.tunnexo.vpn"
         minSdk = flutter.minSdkVersion
         targetSdk = flutter.targetSdkVersion
         versionCode = flutter.versionCode

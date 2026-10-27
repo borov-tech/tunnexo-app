@@ -106,7 +106,7 @@ object SavedParams {
     // ifBlank as well: an existing-but-empty file reads back "" without throwing,
     // which would render a blank notification title.
     fun loadNotificationTitle(): String =
-        runCatching { notifTitleFile.readText().trim() }.getOrDefault("").ifBlank { "FlClashX" }
+        runCatching { notifTitleFile.readText().trim() }.getOrDefault("").ifBlank { "Tunnexo" }
 
     private fun writeAtomic(target: File, content: String) {
         // Unique per-writer temp name: saveQuickStartParams runs in BOTH the :app and

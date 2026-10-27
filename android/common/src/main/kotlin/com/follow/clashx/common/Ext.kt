@@ -46,7 +46,7 @@ fun Service.ensureNotificationChannel() {
 
 fun Service.buildServiceNotification(
     iconRes: Int,
-    title: String = "FlClashX",
+    title: String = "Tunnexo",
     stopText: String = "",
 ): android.app.Notification {
     val launchIntent = packageManager.getLaunchIntentForPackage(packageName)
@@ -75,7 +75,7 @@ fun Service.buildServiceNotification(
         .build()
 }
 
-fun Service.promoteToForeground(iconRes: Int, title: String = "FlClashX"): Boolean {
+fun Service.promoteToForeground(iconRes: Int, title: String = "Tunnexo"): Boolean {
     ensureNotificationChannel()
     val notification = buildServiceNotification(iconRes, title)
     val fgType = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {

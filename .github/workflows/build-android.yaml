@@ -1,0 +1,96 @@
+name: build-android
+
+# Ручной запуск: Actions → build-android → Run workflow.
+# release_tag (например v0.4.2) — прикрепить APK к этой версии на странице Releases.
+# Нужны секреты репозитория: KEYSTORE (base64 ключа), KEY_ALIAS, STORE_PASSWORD, KEY_PASSWORD.
+on:
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: "Прикрепить APK к версии (например v0.4.2). Пусто — только сборка."
+        required: false
+        default: ""
+
+permissions:
+  contents: write
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+jobs:
+  android:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Signing key
+        env:
+          KEYSTORE: ${{ secrets.KEYSTORE }}
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+          STORE_PASSWORD: ${{ secrets.STORE_PASSWORD }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+        run: |
+          if [ -z "$KEYSTORE" ] || [ -z "$KEY_ALIAS" ] || [ -z "$STORE_PASSWORD" ] || [ -z "$KEY_PASSWORD" ]; then
+            echo "::error title=Нет ключа подписи::Добавьте секреты KEYSTORE, KEY_ALIAS, STORE_PASSWORD, KEY_PASSWORD в Settings → Secrets and variables → Actions"
+            exit 1
+          fi
+          echo "$KEYSTORE" | base64 --decode > android/app/keystore.jks
+          {
+            echo "keyAlias=$KEY_ALIAS"
+            echo "storePassword=$STORE_PASSWORD"
+            echo "keyPassword=$KEY_PASSWORD"
+          } >> android/local.properties
+
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Setup Go
+        uses: actions/setup-go@v6
+        with:
+          go-version: "1.26.0"
+          cache-dependency-path: |
+            core/go.sum
+
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: "3.41.7"
+          cache: true
+
+      - name: Get Flutter dependencies
+        run: flutter pub get
+
+      - name: Build (core + APK)
+        run: |
+          dart setup.dart android --env stable 2>&1 | tee build.log
+          code=${PIPESTATUS[0]}
+          if [ "$code" -ne 0 ] || ! ls dist/*.apk >/dev/null 2>&1; then
+            errs=$(grep -iE 'error|exception|failed|what went wrong' build.log | head -40 | sed 's/%/%25/g' | sed ':a;N;$!ba;s/\n/%0A/g')
+            echo "::error title=Error lines::$errs"
+            tail_=$(tail -60 build.log | sed 's/%/%25/g' | sed ':a;N;$!ba;s/\n/%0A/g')
+            echo "::error title=Log tail::$tail_"
+            exit 1
+          fi
+
+      - name: Remove signing key
+        if: always()
+        run: rm -f android/app/keystore.jks android/local.properties
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v6
+        with:
+          name: Tunnexo-android
+          path: ./dist
+          retention-days: 30
+
+      - name: Attach to Release
+        if: inputs.release_tag != ''
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ inputs.release_tag }}
+          files: ./dist/*.apk
