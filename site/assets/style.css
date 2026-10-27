@@ -50,7 +50,7 @@ h1{font-size:clamp(38px,6vw,66px);line-height:1.05;letter-spacing:-.02em;margin:
 .pbtn.secondary{background:rgba(51,10,10,.85);border-color:#5A1C15;color:var(--text)}
 .pbtn.secondary:hover{border-color:var(--ring)}
 .pbtn.secondary svg{color:var(--coral-soft)}
-.pbtn.soon{cursor:default;opacity:.85}
+.pbtn.soon{opacity:.9}
 .pbtn .badge{margin-left:6px;padding:2px 8px;border-radius:10px;background:var(--chip);color:var(--muted);font-size:11px;font-weight:700;opacity:1}
 .hero-note{margin:22px 0 0;font-size:14px;color:var(--muted)}
 
@@ -204,3 +204,13 @@ footer{border-top:1px solid var(--line);padding:36px 0 44px;color:var(--muted);f
   .seg button{flex:1;justify-content:center;padding:0 8px;font-size:14px}
   .pcard,.howto{padding:22px}
 }
+
+/* tablet: use the width instead of a single narrow column */
+@media (min-width:641px) and (max-width:900px){
+  .grid{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .steps,.plans,.home-more{grid-template-columns:repeat(3,minmax(0,1fr))}
+  .plans{max-width:none}
+  .plan{padding:22px}
+  .price{font-size:36px}
+}
+@media (max-width:640px){ .plans{max-width:460px} }
