@@ -1,0 +1,57 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="robots" content="noindex">
+<title>Скачивание Tunnexo</title>
+<meta name="theme-color" content="#1A0001">
+<link rel="icon" href="../favicon.ico" sizes="any">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Jost:wght@500;600&family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="../assets/style.css">
+<style>
+  /* Short branded link for the bot: starts the download from GitHub Releases
+     and tells people what to do next. */
+  .open{min-height:100vh;display:flex;align-items:center;justify-content:center;padding:40px max(20px,env(safe-area-inset-right,0px)) 40px max(20px,env(safe-area-inset-left,0px));
+    background:radial-gradient(420px 300px at 50% 40%,#5A1610 0%,#220102 55%,#120001 100%)}
+  .box{max-width:460px;width:100%;text-align:center;display:flex;flex-direction:column;align-items:center;gap:16px}
+  .box h1{font-size:clamp(26px,6vw,34px);margin:6px 0 0}
+  .box p{margin:0;color:var(--text2)}
+  .box .btn{width:100%}
+  .steps{list-style:none;margin:4px 0 0;padding:16px 18px;text-align:left;display:flex;flex-direction:column;gap:12px;width:100%;box-sizing:border-box;
+    background:rgba(51,10,10,.72);border:1px solid #461511;border-radius:16px}
+  .steps li{display:flex;gap:12px;align-items:flex-start;line-height:1.45}
+  .steps b.n{flex:none;width:26px;height:26px;border-radius:50%;background:rgba(255,90,60,.18);color:#FF8A70;display:flex;align-items:center;justify-content:center;font-size:13px}
+  .spin{width:96px;height:96px;position:relative}
+  .spin i{position:absolute;inset:0;border-radius:50%;border:2px solid rgba(255,90,60,.7);animation:zoomout 1.8s cubic-bezier(.2,.6,.3,1) infinite;opacity:0}
+  .spin i:nth-child(2){animation-delay:.6s}.spin i:nth-child(3){animation-delay:1.2s}
+  .spin svg{position:absolute;left:24px;top:24px}
+  @keyframes zoomout{0%{transform:scale(.5);opacity:.9}100%{transform:scale(1.6);opacity:0}}
+  .small{font-size:14px;color:var(--muted)}
+  @media (prefers-reduced-motion:reduce){.spin i{animation:none;opacity:.3}}
+</style>
+</head>
+<body>
+<main class="open">
+  <div class="box">
+    <div class="spin" aria-hidden="true"><i></i><i></i><i></i>
+      <svg width="48" height="48" viewBox="0 0 48 48" fill="none"><path d="M39.56 13.1A19 19 0 1 0 39.56 34.9" stroke="#FF5A3C" stroke-width="3.6" stroke-linecap="round"/><path d="M33.19 16.29A12 12 0 1 0 33.19 31.71" stroke="#8A281B" stroke-width="3.6" stroke-linecap="round"/><circle cx="24" cy="24" r="5.5" fill="#FFE3D8"/><path d="M28 24h16" stroke="#FF5A3C" stroke-width="3.6" stroke-linecap="round"/></svg>
+    </div>
+    <h1>Загрузка Tunnexo началась</h1>
+    <p>Файл скачивается для Windows 10 и 11.</p>
+    <ol class="steps">
+      <li><b class="n">1</b><span>Откройте скачанный файл <b>Tunnexo-windows-amd64-setup.exe</b>.</span></li>
+      <li><b class="n">2</b><span>Если появится «Windows защитила ваш компьютер» — нажмите «Подробнее» → «Выполнить в любом случае».</span></li>
+      <li><b class="n">3</b><span>После установки вернитесь в бота и нажмите «Подключиться» — подписка добавится сама.</span></li>
+    </ol>
+    <a class="btn btn-primary" id="dl" href="https://github.com/borov-tech/tunnexo-app/releases/latest/download/Tunnexo-windows-amd64-setup.exe">Скачать ещё раз</a>
+    <p class="small"><a class="link" href="../download.html">Все версии</a> · <a class="link" href="../help.html">Помощь</a></p>
+  </div>
+</main>
+<script>
+setTimeout(function () { location.href = document.getElementById('dl').href; }, 400);
+</script>
+</body>
+</html>
