@@ -43,8 +43,14 @@ class HomePage extends StatelessWidget {
                 viewMode != ViewMode.mobile ? navigationBar : null;
             return CommonScaffold(
               key: globalState.homeScaffoldKey,
+              // If the requested page isn't in the menu right now (e.g. the
+              // server list while the core is down), show the page that is
+              // actually on screen instead of a stale title.
               title: Intl.message(
-                pageLabel.name,
+                (index == -1 && navigationItems.isNotEmpty
+                        ? navigationItems[currentIndex].label
+                        : pageLabel)
+                    .name,
               ),
               sideNavigationBar: sideNavigationBar,
               body: child!,

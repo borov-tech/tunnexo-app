@@ -4,9 +4,11 @@ import 'dart:io';
 import 'dart:math' as math;
 
 import 'package:cached_network_image/cached_network_image.dart';
+import 'package:flclashx/clash/clash.dart';
 import 'package:flclashx/common/common.dart';
 import 'package:flclashx/enum/enum.dart';
 import 'package:flclashx/models/models.dart';
+import 'package:flclashx/plugins/app.dart' as app_plugin;
 import 'package:flclashx/providers/providers.dart';
 import 'package:flclashx/state.dart';
 import 'package:flclashx/views/profiles/add_profile.dart';
@@ -42,15 +44,29 @@ void _showHeroToast(String text) {
 // Connect failed: red button + hint above it, cleared after a while or on the
 // next tap.
 final _heroError = ValueNotifier<bool>(false);
+// The failure was the VPN core itself not running (typically the phone killed
+// or blocked Tunnexo's background process): the hint then explains how to
+// allow background work and stays until the next tap.
+final _heroCoreProblem = ValueNotifier<bool>(false);
 Timer? _heroErrorTimer;
 
-void _setHeroError(bool value) {
+void _setHeroError(bool value, {bool core = false}) {
   _heroErrorTimer?.cancel();
+  _heroCoreProblem.value = value && core;
   _heroError.value = value;
-  if (value) {
+  if (value && !core) {
     _heroErrorTimer = Timer(const Duration(seconds: 7), () {
       _heroError.value = false;
     });
+  }
+}
+
+Future<bool> _coreAlive() async {
+  try {
+    return await Future<bool>.value(clashCore.isInit)
+        .timeout(const Duration(seconds: 4));
+  } catch (_) {
+    return false;
   }
 }
 
@@ -419,17 +435,12 @@ class HeroConnect extends ConsumerWidget {
           ),
         ),
         // Pinned to the bottom of the hero, just above the nav bar.
+        const _ErrorHint(),
         const SizedBox(height: 14),
         Stack(
           clipBehavior: Clip.none,
           children: [
             _ConnectButton(isReady: isReady, protectedName: displayName),
-            const Positioned(
-              left: 0,
-              right: 0,
-              bottom: 54 + 12,
-              child: IgnorePointer(child: _ErrorHint()),
-            ),
             const Positioned(
               left: 0,
               right: 0,
@@ -1439,12 +1450,31 @@ class _ConnectButtonState extends ConsumerState<_ConnectButton>
     }
     _heroConnecting.value = true;
     final began = DateTime.now();
-    try {
-      await globalState.appController
-          .updateStatus(true)
-          .timeout(const Duration(seconds: 30));
-    } catch (_) {
-      // Errors are surfaced by the controller itself.
+    Future<void> attempt() async {
+      try {
+        await globalState.appController
+            .updateStatus(true)
+            .timeout(const Duration(seconds: 30));
+      } catch (_) {
+        // Errors are surfaced by the controller itself.
+      }
+    }
+
+    await attempt();
+    var coreOk = true;
+    if (mounted && ref.read(runTimeProvider) == null) {
+      // Failed: if the core isn't running at all, restart it once and retry
+      // before bothering the user.
+      coreOk = await _coreAlive();
+      if (!coreOk) {
+        try {
+          await globalState.appController
+              .restartCore()
+              .timeout(const Duration(seconds: 20));
+        } catch (_) {}
+        coreOk = await _coreAlive();
+        if (coreOk) await attempt();
+      }
     }
     // Keep the "connecting" state on screen long enough to be read.
     const minShow = Duration(milliseconds: 900);
@@ -1454,7 +1484,7 @@ class _ConnectButtonState extends ConsumerState<_ConnectButton>
     if (!mounted) return;
     if (ref.read(runTimeProvider) == null) {
       // Bring-up failed: shake, turn red and explain what to do.
-      _setHeroError(true);
+      _setHeroError(true, core: !coreOk);
       if (!_reduceMotion(context)) _shake.forward(from: 0);
       if (Platform.isAndroid) {
         HapticFeedback.heavyImpact();
@@ -1649,70 +1679,170 @@ class _ErrorHint extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final en = _isEn;
-    return ValueListenableBuilder<bool>(
-      valueListenable: _heroError,
-      builder: (_, visible, __) => AnimatedSlide(
-        offset: visible ? Offset.zero : const Offset(0, 0.25),
-        duration: const Duration(milliseconds: 280),
-        curve: Curves.easeOutCubic,
-        child: AnimatedOpacity(
-          opacity: visible ? 1 : 0,
-          duration: const Duration(milliseconds: 240),
-          child: Container(
-            padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
-            decoration: BoxDecoration(
-              color: const Color(0xF25A1010),
-              borderRadius: BorderRadius.circular(16),
-              border: Border.all(
-                  color: const Color(0xFFEF5350).withValues(alpha: 0.55)),
-              boxShadow: [
-                BoxShadow(
-                  color: Colors.black.withValues(alpha: 0.35),
-                  blurRadius: 18,
-                  offset: const Offset(0, 6),
-                ),
-              ],
-            ),
-            child: Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                const Icon(Icons.error_outline_rounded,
-                    size: 22, color: Color(0xFFFF8A80)),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Text(
-                        en ? 'Could not connect' : 'Не удалось подключиться',
-                        style: context.textTheme.titleSmall?.copyWith(
-                          color: Colors.white,
-                          fontWeight: FontWeight.w800,
-                        ),
+    return AnimatedBuilder(
+      animation: Listenable.merge([_heroError, _heroCoreProblem]),
+      builder: (context, _) {
+        final visible = _heroError.value;
+        final core = _heroCoreProblem.value;
+        final String title;
+        final String text;
+        if (core && Platform.isAndroid) {
+          title = en
+              ? 'The phone is blocking Tunnexo'
+              : 'Телефон не даёт Tunnexo работать';
+          text = en
+              ? 'Allow Tunnexo to run in the background: turn off battery '
+                  'restrictions and enable autostart, then tap the button again.'
+              : 'Разрешите Tunnexo работать в фоне: снимите ограничения '
+                  'батареи и включите автозапуск, затем нажмите кнопку ещё раз.';
+        } else if (core) {
+          title = en
+              ? 'The VPN core did not start'
+              : 'Не удалось запустить ядро VPN';
+          text = en
+              ? 'Quit Tunnexo from the tray icon, open it again and tap '
+                  'the button.'
+              : 'Закройте Tunnexo через значок в трее, откройте снова '
+                  'и нажмите кнопку.';
+        } else {
+          title = en ? 'Could not connect' : 'Не удалось подключиться';
+          text = en
+              ? 'Check your internet and tap the button again. '
+                  'Still failing — tap “Update” or pick another country.'
+              : 'Проверьте интернет и нажмите кнопку ещё раз. '
+                  'Не помогает — нажмите «Обновить» или выберите другую страну.';
+        }
+
+        final card = Container(
+          margin: const EdgeInsets.only(top: 12),
+          padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
+          decoration: BoxDecoration(
+            color: const Color(0xF25A1010),
+            borderRadius: BorderRadius.circular(16),
+            border: Border.all(
+                color: const Color(0xFFEF5350).withValues(alpha: 0.55)),
+          ),
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Icon(Icons.error_outline_rounded,
+                  size: 22, color: Color(0xFFFF8A80)),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      title,
+                      style: context.textTheme.titleSmall?.copyWith(
+                        color: Colors.white,
+                        fontWeight: FontWeight.w800,
                       ),
-                      const SizedBox(height: 3),
-                      Text(
-                        en
-                            ? 'Check your internet and tap the button again. '
-                                'Still failing — tap “Update” or pick another country.'
-                            : 'Проверьте интернет и нажмите кнопку ещё раз. '
-                                'Не помогает — нажмите «Обновить» или выберите другую страну.',
-                        style: context.textTheme.bodySmall?.copyWith(
-                          color: const Color(0xFFF3D2C8),
-                          height: 1.4,
-                        ),
+                    ),
+                    const SizedBox(height: 3),
+                    Text(
+                      text,
+                      style: context.textTheme.bodySmall?.copyWith(
+                        color: const Color(0xFFF3D2C8),
+                        height: 1.4,
+                      ),
+                    ),
+                    if (core && Platform.isAndroid) ...[
+                      const SizedBox(height: 10),
+                      Wrap(
+                        spacing: 8,
+                        runSpacing: 8,
+                        children: [
+                          _HintAction(
+                            icon: Icons.battery_charging_full_rounded,
+                            label: en ? 'Battery' : 'Батарея',
+                            onTap: () => app_plugin.app
+                                ?.requestIgnoreBatteryOptimizations(),
+                          ),
+                          _HintAction(
+                            icon: Icons.play_circle_outline_rounded,
+                            label: en ? 'Autostart' : 'Автозапуск',
+                            onTap: () =>
+                                app_plugin.app?.openAutoStartSettings(),
+                          ),
+                        ],
                       ),
                     ],
-                  ),
+                  ],
                 ),
-              ],
-            ),
+              ),
+            ],
           ),
-        ),
-      ),
+        );
+
+        return AnimatedSize(
+          duration: const Duration(milliseconds: 280),
+          curve: Curves.easeOutCubic,
+          alignment: Alignment.bottomCenter,
+          child: AnimatedSwitcher(
+            duration: const Duration(milliseconds: 240),
+            transitionBuilder: (child, animation) => FadeTransition(
+              opacity: animation,
+              child: SlideTransition(
+                position: Tween<Offset>(
+                  begin: const Offset(0, 0.15),
+                  end: Offset.zero,
+                ).animate(animation),
+                child: child,
+              ),
+            ),
+            child: visible
+                ? KeyedSubtree(
+                    key: ValueKey('hint-$core'),
+                    child: card,
+                  )
+                : const SizedBox(width: double.infinity),
+          ),
+        );
+      },
     );
   }
+}
+
+class _HintAction extends StatelessWidget {
+  const _HintAction({
+    required this.icon,
+    required this.label,
+    required this.onTap,
+  });
+
+  final IconData icon;
+  final String label;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) => _FocusableTap(
+        borderRadius: 18,
+        onTap: onTap,
+        child: Container(
+          height: 36,
+          padding: const EdgeInsets.symmetric(horizontal: 14),
+          decoration: BoxDecoration(
+            color: Colors.white.withValues(alpha: 0.12),
+            borderRadius: BorderRadius.circular(18),
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(icon, size: 18, color: Colors.white),
+              const SizedBox(width: 6),
+              Text(
+                label,
+                style: context.textTheme.labelLarge?.copyWith(
+                  color: Colors.white,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+            ],
+          ),
+        ),
+      );
 }
 
 // ----------------------------------------------------------------------------

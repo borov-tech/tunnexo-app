@@ -332,13 +332,19 @@ class AppPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, ActivityAware 
             android.content.ComponentName("com.iqoo.secure", "com.iqoo.secure.ui.phoneoptimize.AddWhiteListActivity"),
             // Letv
             android.content.ComponentName("com.letv.android.letvsafe", "com.letv.android.letvsafe.AutobootManageActivity"),
+            // Transsion (Tecno / Infinix / itel) — Phone Master
+            android.content.ComponentName("com.transsion.phonemaster", "com.cyin.himgr.autostart.AutoStartActivity"),
+            // Samsung — battery / background usage
+            android.content.ComponentName("com.samsung.android.lool", "com.samsung.android.sm.battery.ui.BatteryActivity"),
+            // Asus
+            android.content.ComponentName("com.asus.mobilemanager", "com.asus.mobilemanager.autostart.AutoStartActivity"),
         )
+        // No resolveActivity() pre-check: on Android 11+ package visibility
+        // hides other apps' activities from it, so just try each one.
         for (cn in candidates) {
             val intent = Intent().setComponent(cn).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-            if (ctx.packageManager.resolveActivity(intent, 0) != null) {
-                val ok = runCatching { (activity ?: ctx).startActivity(intent) }.isSuccess
-                if (ok) return true
-            }
+            val ok = runCatching { (activity ?: ctx).startActivity(intent) }.isSuccess
+            if (ok) return true
         }
         // Fallback: the app's detail settings page (always present).
         return runCatching {
