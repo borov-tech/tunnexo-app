@@ -4,6 +4,7 @@ import 'dart:io';
 import 'dart:isolate';
 
 import 'package:archive/archive.dart';
+import 'package:flclashx/services/app_updater.dart';
 import 'package:flclashx/clash/clash.dart';
 import 'package:flclashx/common/archive.dart';
 import 'package:flclashx/services/subscription_notification_service.dart';
@@ -1155,9 +1156,8 @@ class AppController {
   }
 
   Future<void> autoCheckUpdate() async {
-    if (!_ref.read(appSettingProvider).autoCheckUpdate) return;
-    final res = await request.checkForUpdate();
-    checkUpdateResultHandle(data: res);
+    // Tunnexo always looks for updates (there's no app store to do it for us).
+    AppUpdater.start();
   }
 
   Future<void> checkUpdateResultHandle({
@@ -1165,6 +1165,10 @@ class AppController {
     bool handleError = false,
   }) async {
     if (globalState.isPre) {
+      return;
+    }
+    if (data != null && (Platform.isWindows || Platform.isAndroid)) {
+      await AppUpdater.offer(data);
       return;
     }
     if (data != null) {

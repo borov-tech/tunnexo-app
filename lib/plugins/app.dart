@@ -61,6 +61,12 @@ class App {
     });
   }
 
+  /// In-app update: opens the system installer for the APK at [path].
+  /// Returns "ok", "need_permission" or "error".
+  Future<String> installApk(String path) async =>
+      await methodChannel.invokeMethod<String>("installApk", {"path": path}) ??
+      "error";
+
   Future<bool> openFile(String path) async => await methodChannel.invokeMethod<bool>("openFile", {
           "path": path,
         }) ??

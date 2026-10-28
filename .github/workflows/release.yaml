@@ -8,6 +8,10 @@ on:
       release_tag:
         description: "Версия, например v0.4.4"
         required: true
+      notes:
+        description: "Что нового (покажется в окне обновления в приложении)"
+        required: false
+        default: ""
 
 permissions:
   contents: write
@@ -43,4 +47,5 @@ jobs:
           name: Tunnexo ${{ inputs.release_tag }}
           target_commitish: ${{ github.sha }}
           make_latest: true
+          body: ${{ inputs.notes }}
           files: dist/*

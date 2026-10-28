@@ -244,3 +244,5 @@ Root: HKA; Subkey: "Software\Classes\tunnexo\DefaultIcon"; ValueType: string; Va
 Root: HKA; Subkey: "Software\Classes\tunnexo\shell\open\command"; ValueType: string; ValueName: ""; ValueData: """{app}\{{EXECUTABLE_NAME}}"" ""%1"""
 [Run]
 Filename: "{app}\\{{EXECUTABLE_NAME}}"; Description: "{cm:LaunchProgram,{{DISPLAY_NAME}}}"; Flags: {% if PRIVILEGES_REQUIRED == 'admin' %}runascurrentuser{% endif %} nowait postinstall skipifsilent
+; In-app updates run the installer with /SILENT: start the new version afterwards.
+Filename: "{app}\\{{EXECUTABLE_NAME}}"; Flags: nowait runasoriginaluser; Check: WizardSilent

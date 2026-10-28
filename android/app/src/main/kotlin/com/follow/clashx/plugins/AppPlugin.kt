@@ -267,6 +267,11 @@ class AppPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, ActivityAware 
                 result.success(openAutoStartSettings())
             }
 
+            "installApk" -> {
+                val path = call.argument<String>("path") ?: run { result.success("error"); return }
+                result.success(installApk(path))
+            }
+
             else -> {
                 result.notImplemented()
             }
@@ -354,6 +359,37 @@ class AppPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, ActivityAware 
             (activity ?: ctx).startActivity(intent)
             true
         }.getOrDefault(false)
+    }
+
+    // In-app update: hands the downloaded APK to the system installer.
+    // Returns "ok", "need_permission" (the "install unknown apps" switch was
+    // opened for us) or "error".
+    private fun installApk(path: String): String {
+        val ctx = FlClashXApplication.getAppContext()
+        val activity = activityRef?.get()
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O &&
+            !ctx.packageManager.canRequestPackageInstalls()
+        ) {
+            return runCatching {
+                val intent = Intent(
+                    android.provider.Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES,
+                    android.net.Uri.parse("package:${ctx.packageName}")
+                ).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                (activity ?: ctx).startActivity(intent)
+                "need_permission"
+            }.getOrDefault("error")
+        }
+        return runCatching {
+            val file = File(path)
+            val uri = FileProvider.getUriForFile(
+                ctx, "${ctx.packageName}.fileProvider", file
+            )
+            val intent = Intent(Intent.ACTION_VIEW)
+                .setDataAndType(uri, "application/vnd.android.package-archive")
+                .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_ACTIVITY_NEW_TASK)
+            (activity ?: ctx).startActivity(intent)
+            "ok"
+        }.getOrDefault("error")
     }
 
     private fun openFile(path: String) {
