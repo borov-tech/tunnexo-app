@@ -235,9 +235,27 @@ extension ProfileExtension on Profile {
       }
     }
 
+    // Name the profile after the service (flclashx-servicename, e.g. "Tunnexo")
+    // instead of the panel's per-user file name ("user_1299…"). A name the
+    // user typed themselves is kept.
+    final dispositionName = utils.getFileNameForDisposition(disposition);
+    String? serviceName;
+    final rawService = providerHeaders['flclashx-servicename']?.trim();
+    if (rawService != null && rawService.isNotEmpty) {
+      try {
+        serviceName = utf8.decode(base64.decode(base64.normalize(rawService))).trim();
+      } catch (_) {
+        serviceName = rawService;
+      }
+      if (serviceName.isEmpty) serviceName = null;
+    }
+    final autoLabel = label == null || label == id || label == dispositionName;
+    final newLabel =
+        autoLabel ? (serviceName ?? dispositionName ?? id) : label;
+
     return copyWith(
       url: updatedUrl,
-      label: label ?? utils.getFileNameForDisposition(disposition) ?? id,
+      label: newLabel,
       subscriptionInfo: SubscriptionInfo.formHString(userinfo),
       autoUpdateDuration: durationFromHeader ?? autoUpdateDuration,
       providerHeaders: providerHeaders,
