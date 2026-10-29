@@ -290,10 +290,16 @@ class Build {
         env["CGO_ENABLED"] = "0";
       }
 
+      // Android 15+ devices may use 16 KB memory pages: a library linked with
+      // the default 4 KB alignment fails to load there, and the VPN core never
+      // starts ("getConfig timed out"). Align the core for 16 KB pages.
+      final pageSizeFlag = isLib && item.target == Target.android
+          ? " -extldflags=-Wl,-z,max-page-size=16384"
+          : "";
       final execLines = [
         "go",
         "build",
-        "-ldflags=-w -s -X github.com/metacubex/mihomo/constant.Version=$coreVersion",
+        "-ldflags=-w -s -X github.com/metacubex/mihomo/constant.Version=$coreVersion$pageSizeFlag",
         "-tags=${tagsFor(target)}",
         if (isLib) "-buildmode=c-shared",
         "-o",
