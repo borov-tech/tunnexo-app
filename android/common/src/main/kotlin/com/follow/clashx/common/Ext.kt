@@ -11,8 +11,13 @@ import androidx.core.app.ServiceCompat
 import kotlin.reflect.KClass
 
 
+// Explicit intent to one of OUR components. The package must be the app's real
+// package (applicationId = com.tunnexo.vpn), not the code namespace
+// (com.follow.clashx): with the namespace, bindService() targeted another,
+// non-existent app, the :remote core service was never bound, and every core
+// call timed out ("getConfig timed out") on Android.
 val KClass<*>.intent: Intent
-    get() = Intent().setClassName(Components.PACKAGE_NAME, java.name)
+    get() = Intent().setClassName(GlobalState.application.packageName, java.name)
 
 
 fun Context.registerReceiverCompat(
