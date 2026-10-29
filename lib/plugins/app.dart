@@ -61,6 +61,13 @@ class App {
     });
   }
 
+  /// Support: builds a diagnostics report (device + recent logs) and opens
+  /// the share sheet so it can be sent to support.
+  Future<bool> shareDiagnostics([String extra = '']) async =>
+      await methodChannel
+          .invokeMethod<bool>("shareDiagnostics", {"extra": extra}) ??
+      false;
+
   /// In-app update: opens the system installer for the APK at [path].
   /// Returns "ok", "need_permission" or "error".
   Future<String> installApk(String path) async =>

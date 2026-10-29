@@ -267,6 +267,11 @@ class AppPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, ActivityAware 
                 result.success(openAutoStartSettings())
             }
 
+            "shareDiagnostics" -> {
+                shareDiagnostics(call.argument<String>("extra") ?: "")
+                result.success(true)
+            }
+
             "installApk" -> {
                 val path = call.argument<String>("path") ?: run { result.success("error"); return }
                 result.success(installApk(path))
@@ -359,6 +364,53 @@ class AppPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, ActivityAware 
             (activity ?: ctx).startActivity(intent)
             true
         }.getOrDefault(false)
+    }
+
+    // Support: collects device facts + this app's recent logcat (both the UI
+    // process and the :remote core process share our UID, so `logcat -d` sees
+    // them without any permission) into a text file and opens the share sheet.
+    private fun shareDiagnostics(extra: String) {
+        val ctx = FlClashXApplication.getAppContext()
+        Thread {
+            runCatching {
+                val sb = StringBuilder()
+                sb.append("Tunnexo diagnostics\n")
+                runCatching {
+                    val pi = ctx.packageManager.getPackageInfo(ctx.packageName, 0)
+                    sb.append("app: ").append(pi.versionName).append('\n')
+                }
+                sb.append("device: ").append(Build.MANUFACTURER).append(' ').append(Build.MODEL)
+                    .append(" (").append(Build.DEVICE).append(")\n")
+                sb.append("android: ").append(Build.VERSION.RELEASE).append(" sdk ")
+                    .append(Build.VERSION.SDK_INT).append('\n')
+                sb.append("abis: ").append(Build.SUPPORTED_ABIS.joinToString()).append('\n')
+                runCatching {
+                    sb.append("page size: ")
+                        .append(android.system.Os.sysconf(android.system.OsConstants._SC_PAGESIZE))
+                        .append('\n')
+                }
+                if (extra.isNotEmpty()) sb.append(extra).append('\n')
+                sb.append("\n----- logcat -----\n")
+                val proc = Runtime.getRuntime().exec(arrayOf("logcat", "-d", "-v", "time", "-t", "5000"))
+                sb.append(proc.inputStream.bufferedReader().readText())
+                proc.waitFor()
+
+                val dir = File(ctx.filesDir, "diag").apply { mkdirs() }
+                val file = File(dir, "tunnexo-report.txt")
+                file.writeText(sb.toString())
+                val uri = FileProvider.getUriForFile(ctx, "${ctx.packageName}.fileProvider", file)
+                val send = Intent(Intent.ACTION_SEND)
+                    .setType("text/plain")
+                    .putExtra(Intent.EXTRA_STREAM, uri)
+                    .putExtra(Intent.EXTRA_SUBJECT, "Tunnexo report")
+                    .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                val chooser = Intent.createChooser(send, "Tunnexo")
+                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                Handler(Looper.getMainLooper()).post {
+                    runCatching { (activityRef?.get() ?: ctx).startActivity(chooser) }
+                }
+            }
+        }.start()
     }
 
     // In-app update: hands the downloaded APK to the system installer.

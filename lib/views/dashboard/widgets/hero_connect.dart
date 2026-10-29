@@ -1766,6 +1766,12 @@ class _ErrorHint extends StatelessWidget {
                             onTap: () =>
                                 app_plugin.app?.openAutoStartSettings(),
                           ),
+                          _HintAction(
+                            icon: Icons.send_rounded,
+                            label: en ? 'Send report' : 'Отправить отчёт',
+                            onTap: () => app_plugin.app?.shareDiagnostics(
+                                'ui: core did not start on connect'),
+                          ),
                         ],
                       ),
                     ],
